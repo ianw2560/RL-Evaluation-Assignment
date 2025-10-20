@@ -1,9 +1,11 @@
+#!/usr/bin/env python
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import gymnasium as gym
 from gymnasium import spaces
-from stable_baselines3 import SAC
+from stable_baselines3 import SAC, PPO, TD3, DDPG
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.logger import configure
@@ -47,6 +49,79 @@ def chunk_into_episodes(data, chunk_size):
         episodes.append(chunk)
         start = end
     return episodes
+
+def select_algo(algo_name, train_env, device, learning_rate=3e-4, batch_size=256):
+
+    policy_kwargs = dict(net_arch=[256, 256], activation_fn=nn.ReLU)
+
+    if algo_name == "SAC":
+        model = SAC(
+            policy="MlpPolicy",
+            env=train_env,
+            verbose=1,
+            policy_kwargs=policy_kwargs,
+            device=device,
+
+            # Model specific params
+            learning_rate=learning_rate,
+            batch_size=batch_size, # default is 256
+            buffer_size=200000,
+            tau=0.005,
+            gamma=0.99,
+            ent_coef='auto',
+        )
+    elif algo_name == "PPO":
+        model = PPO(
+            policy="MlpPolicy",
+            env=train_env,
+            verbose=1,
+            policy_kwargs=policy_kwargs,
+            device=device,
+
+            # Model specific params
+            learning_rate=learning_rate,
+            batch_size=64, # default is 64
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            ent_coef=0.0,
+        )
+    elif algo_name == "TD3":
+        model = SAC(
+            policy="MlpPolicy",
+            env=train_env,
+            verbose=1,
+            policy_kwargs=policy_kwargs,
+            device=device,
+
+            # Model specific params
+            learning_rate=learning_rate, # default is 1e-3
+            batch_size=256,
+            buffer_size=1000000,
+            tau=0.005,
+            gamma=0.99,
+            # policy_delay=2,
+            train_freq=1,
+        )
+    elif algo_name == "DDPG":
+        model = SAC(
+            policy="MlpPolicy",
+            env=train_env,
+            verbose=1,
+            policy_kwargs=policy_kwargs,
+            device=device,
+
+            # Model specific params
+            learning_rate=learning_rate,
+            batch_size=256,
+            buffer_size=1000000,
+            tau=0.005,
+            gamma=0.99,
+        )
+    else:
+        raise ValueError("Invalid algorithm selected!")
+
+    return model
 
 # ------------------------------------------------------------------------
 # 3A) Training Environment: picks a random chunk each reset
@@ -214,6 +289,28 @@ def main():
         default=100,
         help="Episode length for training (e.g. 50, 100, 200)."
     )
+    parser.add_argument(
+        "-a, --algorithm",
+        dest="algorithm",
+        type=str,
+        default="SAC",
+        choices=["SAC", "PPO", "TD3", "DDPG"],
+        help="Select the RL algorithm to use."
+    )
+    parser.add_argument(
+        "-lr, --learning-rate",
+        dest="learning_rate",
+        type=float,
+        default=3e-4,
+        help="Select the learning rate for training."
+    )
+    parser.add_argument(
+        "-bs, --batch-size",
+        dest="batch_size",
+        type=int,
+        default=256,
+        help="Select the learning rate for training."
+    )
     args = parser.parse_args()
 
     log_dir = args.output_dir
@@ -227,6 +324,15 @@ def main():
     episodes_list = chunk_into_episodes(full_speed_data, chunk_size)
     print(f"Number of episodes: {len(episodes_list)} (some leftover if 1200 not divisible by {chunk_size})")
 
+    algo_name = args.algorithm
+    print(f"[INFO] Using algorithm: {algo_name}")
+
+    learning_rate = args.learning_rate
+    print(f"[INFO] Using learning_rate = {learning_rate}")    
+
+    batch_size = args.batch_size
+    print(f"[INFO] Using batch_size = {batch_size}")    
+
     # 5B) Create the TRAIN environment
     def make_train_env():
         return TrainEnv(episodes_list, delta_t=1.0)
@@ -234,27 +340,15 @@ def main():
     train_env = DummyVecEnv([make_train_env])
 
     # 5C) Build the model (SAC with MlpPolicy)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() and algo_name != "PPO" else "cpu")
     print(f"Training on device: {device}")
 
-    policy_kwargs = dict(net_arch=[256, 256], activation_fn=nn.ReLU)
-    model = SAC(
-        policy="MlpPolicy",
-        env=train_env,
-        verbose=1,
-        policy_kwargs=policy_kwargs,
-        learning_rate=3e-4,
-        batch_size=256,
-        buffer_size=200000,
-        tau=0.005,
-        gamma=0.99,
-        ent_coef='auto',
-        device=device
-    )
-
+    # Select the algorithm and associated hyperparameters
+    model = select_algo(algo_name, train_env, device, learning_rate, batch_size)
     model.set_logger(logger)
 
     total_timesteps = 100_000
+    # total_timesteps = 1_000
     callback = CustomLoggingCallback(log_dir)
 
     print(f"[INFO] Start training for {total_timesteps} timesteps...")
@@ -268,7 +362,7 @@ def main():
     print(f"[INFO] Training finished in {end_time - start_time:.2f}s")
 
     # 5D) Save the model
-    save_path = os.path.join(log_dir, f"sac_speed_follow_chunk{chunk_size}")
+    save_path = os.path.join(log_dir, f"{algo_name}_lr={learning_rate}_bs={batch_size}_cs={chunk_size}")
     model.save(save_path)
     print(f"[INFO] Model saved to: {save_path}.zip")
 
@@ -303,7 +397,9 @@ def main():
     plt.title(f"Test on full 1200-step dataset (chunk_size={chunk_size})")
     plt.legend()
     plt.tight_layout()
-    plt.show()
+
+    os.makedirs("images", exist_ok=True)
+    plt.savefig(f"images/{algo_name}_chunksize={chunk_size}_lr={str(learning_rate)}_bs={batch_size}.png")
 
 
 if __name__ == "__main__":
