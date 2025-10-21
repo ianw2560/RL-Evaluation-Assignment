@@ -9,6 +9,7 @@ from stable_baselines3 import SAC, PPO, TD3, DDPG
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.logger import configure
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 import torch
 import torch.nn as nn
@@ -122,6 +123,44 @@ def select_algo(algo_name, train_env, device, learning_rate=3e-4, batch_size=256
         raise ValueError("Invalid algorithm selected!")
 
     return model
+
+def compute_metrics(algo_name, chunk_size, learning_rate, batch_size, reference_speeds, predicted_speeds, rewards, total_timesteps, output_csv):
+    """
+    Compute performance metrics after testing.
+    """
+    ref = np.array(reference_speeds)
+    pred = np.array(predicted_speeds)
+
+    mae = mean_absolute_error(ref, pred)
+    mse = mean_squared_error(ref, pred)
+    rmse = np.sqrt(mse)
+
+    # Convergence rate (very rough): average reward improvement per 1k steps
+    # You can refine this later if you log intermediate rewards.
+    convergence_rate = np.mean(rewards[-100:]) - np.mean(rewards[:100])
+    convergence_rate /= total_timesteps / 1000  # normalize per 1k steps
+
+    print(f"[METRICS] MAE={mae:.4f}, MSE={mse:.4f}, RMSE={rmse:.4f}, ConvergenceRate={convergence_rate:.6f}")
+
+    # Append results to CSV
+    fieldnames = ["Algorithm", "ChunkSize", "LearningRate", "BatchSize", "MAE", "MSE", "RMSE", "ConvergenceRate"]
+    new_row = {
+        "Algorithm": algo_name,
+        "ChunkSize": chunk_size,
+        "LearningRate": learning_rate,
+        "BatchSize": batch_size,
+        "MAE": mae,
+        "MSE": mse,
+        "RMSE": rmse,
+        "ConvergenceRate": convergence_rate
+    }
+
+    file_exists = os.path.isfile(output_csv)
+    with open(output_csv, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(new_row)
 
 # ------------------------------------------------------------------------
 # 3A) Training Environment: picks a random chunk each reset
@@ -309,7 +348,14 @@ def main():
         dest="batch_size",
         type=int,
         default=256,
-        help="Select the learning rate for training."
+        help="Select the batch size for training."
+    )
+    parser.add_argument(
+        "-ts, --timesteps",
+        dest="timesteps",
+        type=int,
+        default=100_000,
+        help="Select the total number of time steps."
     )
     args = parser.parse_args()
 
@@ -347,8 +393,7 @@ def main():
     model = select_algo(algo_name, train_env, device, learning_rate, batch_size)
     model.set_logger(logger)
 
-    total_timesteps = 100_000
-    # total_timesteps = 1_000
+    total_timesteps = args.timesteps
     callback = CustomLoggingCallback(log_dir)
 
     print(f"[INFO] Start training for {total_timesteps} timesteps...")
@@ -387,6 +432,9 @@ def main():
 
     avg_test_reward = np.mean(rewards)
     print(f"[TEST] Average reward over 1200-step test: {avg_test_reward:.3f}")
+    metrics_csv = os.path.join(log_dir, "metrics_summary.csv")
+    compute_metrics(algo_name, chunk_size, learning_rate, batch_size, reference_speeds, predicted_speeds, rewards, total_timesteps, metrics_csv)
+
 
     # Plot the entire test
     plt.figure(figsize=(10, 5))
