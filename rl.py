@@ -88,7 +88,7 @@ def select_algo(algo_name, train_env, device, learning_rate=3e-4, batch_size=256
             ent_coef=0.0,
         )
     elif algo_name == "TD3":
-        model = SAC(
+        model = TD3(
             policy="MlpPolicy",
             env=train_env,
             verbose=1,
@@ -105,7 +105,7 @@ def select_algo(algo_name, train_env, device, learning_rate=3e-4, batch_size=256
             train_freq=1,
         )
     elif algo_name == "DDPG":
-        model = SAC(
+        model = DDPG(
             policy="MlpPolicy",
             env=train_env,
             verbose=1,
@@ -310,6 +310,147 @@ class CustomLoggingCallback(BaseCallback):
 
         return True
 
+class ModelEvaluationEnv():
+
+    def __init__(self, algo_name, learning_rate, batch_size, total_timesteps, chunk_size, log_dir, logger, episodes_list):
+        self.algo_name = algo_name
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
+        self.chunk_size = chunk_size
+        self.total_timesteps = total_timesteps
+        self.log_dir = log_dir
+        self.logger = logger
+        self.episodes_list = episodes_list
+
+        self.model = None
+
+    # ------------------------------------------------------------------------
+    # Train a model
+    # ------------------------------------------------------------------------
+    def train(self):
+        # Name of model trained with the unique set of parameters
+        trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_cs={self.chunk_size}"
+
+        # Check if pre-trained model exists for the given set of parameters
+        # If it doesn't exist, start training
+        trained_model_path = f"{self.log_dir}/{trained_model_name}"
+        if os.path.exists(f"{self.log_dir}/{trained_model_name}"):
+            print(f"[INFO] {trained_model_name} already exists! Loading pretrained model")
+            if algo_name == "SAC":
+                self.model = SAC.load(trained_model_path)
+            elif algo_name == "PPO":
+                self.model = PPO.load(trained_model_path)
+            elif algo_name == "TD3":
+                self.model = TD3.load(trained_model_path)
+            elif algo_name == "DDPG":
+                self.model = DDPG.load(trained_model_path)
+            else:
+                raise ValueError("Invalid algorithm selected!")
+        else:
+            print(f"[INFO] {trained_model_name} doesn't exist. Starting training")
+            self.model = self.train_model()
+
+    def train_model(self):
+
+        # 5B) Create the TRAIN environment
+        def make_train_env():
+            return TrainEnv(self.episodes_list, delta_t=1.0)
+
+        train_env = DummyVecEnv([make_train_env])
+
+        # 5C) Build the model (SAC with MlpPolicy)
+        device = torch.device("cuda" if torch.cuda.is_available() and self.algo_name != "PPO" else "cpu")
+        print(f"Training on device: {device}")
+
+        # Select the algorithm and associated hyperparameters
+        self.model = select_algo(self.algo_name, train_env, device, self.learning_rate, self.batch_size)
+        self.model.set_logger(self.logger)
+
+        callback = CustomLoggingCallback(self.log_dir)
+
+        print(f"[INFO] Start training for {self.total_timesteps} timesteps...")
+        start_time = time.time()
+        self.model.learn(
+            total_timesteps=self.total_timesteps,
+            log_interval=100,
+            callback=callback
+        )
+        end_time = time.time()
+        print(f"[INFO] Training finished in {end_time - start_time:.2f}s")
+
+        # 5D) Save the model
+        save_path = os.path.join(self.log_dir, trained_model_name)
+        self.model.save(save_path)
+        print(f"[INFO] Model saved to: {save_path}.zip")
+
+# ------------------------------------------------------------------------
+# Declare project tasks based on assignment document
+# ------------------------------------------------------------------------
+def task1():
+    print("running test 1")
+    pass
+    
+def run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, total_timesteps, log_dir, logger):
+
+    episodes_list = chunk_into_episodes(full_speed_data, chunk_size)
+
+    print(f"[INFO] Using algorithm: {algo_name}")
+    print(f"[INFO] Using chunk_size = {chunk_size}")
+    print(f"[INFO] Using learning_rate = {learning_rate}")
+    print(f"Number of episodes: {len(episodes_list)} (some leftover if 1200 not divisible by {chunk_size})")
+    print(f"[INFO] Using batch_size = {batch_size}")
+
+    model_env = ModelEvaluationEnv(algo_name=algo_name, 
+                                   batch_size=batch_size,
+                                   learning_rate=learning_rate,
+                                   chunk_size=chunk_size,
+                                   total_timesteps=total_timesteps,
+                                   log_dir=log_dir,
+                                   logger=logger,
+                                   episodes_list=episodes_list
+                                   )
+
+    # Train model based on given parameters
+    model_env.train()
+    model = model_env.model
+
+    # ------------------------------------------------------------------------
+    # 5E) Test the model on the FULL 1200-step dataset in one go
+    # ------------------------------------------------------------------------
+    test_env = TestEnv(full_speed_data, delta_t=1.0)
+
+    obs, _ = test_env.reset()
+    predicted_speeds = []
+    reference_speeds = []
+    rewards = []
+
+    for _ in range(DATA_LEN):
+        action, _states = model.predict(obs, deterministic=True)
+        obs, reward, terminated, truncated, info = test_env.step(action)
+        predicted_speeds.append(obs[0])  # current_speed
+        reference_speeds.append(obs[1])  # reference_speed
+        rewards.append(reward)
+        if terminated or truncated:
+            break
+
+    avg_test_reward = np.mean(rewards)
+    print(f"[TEST] Average reward over 1200-step test: {avg_test_reward:.3f}")
+    metrics_csv = os.path.join(log_dir, "metrics_summary.csv")
+    compute_metrics(algo_name, chunk_size, learning_rate, batch_size, reference_speeds, predicted_speeds, rewards, total_timesteps, metrics_csv)
+
+
+    # Plot the entire test
+    plt.figure(figsize=(10, 5))
+    plt.plot(reference_speeds, label="Reference Speed", linestyle="--")
+    plt.plot(predicted_speeds, label="Predicted Speed", linestyle="-")
+    plt.xlabel("Timestep")
+    plt.ylabel("Speed (m/s)")
+    plt.title(f"Test on full 1200-step dataset (chunk_size={chunk_size})")
+    plt.legend()
+    plt.tight_layout()
+
+    os.makedirs("images", exist_ok=True)
+    plt.savefig(f"images/{algo_name}_chunksize={chunk_size}_lr={str(learning_rate)}_bs={batch_size}.png")
 
 # ------------------------------------------------------------------------
 # 5) Main: user sets chunk_size from command line, train, then test
@@ -357,98 +498,36 @@ def main():
         default=100_000,
         help="Select the total number of time steps."
     )
+    parser.add_argument(
+        "--test",
+        dest="test",
+        type=str,
+        default="cli",
+        help="Select the test to run."
+    )
     args = parser.parse_args()
 
+    # Create logger
     log_dir = args.output_dir
     os.makedirs(log_dir, exist_ok=True)
     logger = configure(log_dir, ["stdout", "tensorboard"])
 
-    chunk_size = args.chunk_size
-    print(f"[INFO] Using chunk_size = {chunk_size}")
-
-    # 5A) Split the 1200-step dataset into chunk_size episodes
-    episodes_list = chunk_into_episodes(full_speed_data, chunk_size)
-    print(f"Number of episodes: {len(episodes_list)} (some leftover if 1200 not divisible by {chunk_size})")
-
+    # Parse args
     algo_name = args.algorithm
-    print(f"[INFO] Using algorithm: {algo_name}")
-
-    learning_rate = args.learning_rate
-    print(f"[INFO] Using learning_rate = {learning_rate}")    
-
     batch_size = args.batch_size
-    print(f"[INFO] Using batch_size = {batch_size}")    
-
-    # 5B) Create the TRAIN environment
-    def make_train_env():
-        return TrainEnv(episodes_list, delta_t=1.0)
-
-    train_env = DummyVecEnv([make_train_env])
-
-    # 5C) Build the model (SAC with MlpPolicy)
-    device = torch.device("cuda" if torch.cuda.is_available() and algo_name != "PPO" else "cpu")
-    print(f"Training on device: {device}")
-
-    # Select the algorithm and associated hyperparameters
-    model = select_algo(algo_name, train_env, device, learning_rate, batch_size)
-    model.set_logger(logger)
-
+    chunk_size = args.chunk_size
+    
+    learning_rate = args.learning_rate
     total_timesteps = args.timesteps
-    callback = CustomLoggingCallback(log_dir)
+    test = args.test
 
-    print(f"[INFO] Start training for {total_timesteps} timesteps...")
-    start_time = time.time()
-    model.learn(
-        total_timesteps=total_timesteps,
-        log_interval=100,
-        callback=callback
-    )
-    end_time = time.time()
-    print(f"[INFO] Training finished in {end_time - start_time:.2f}s")
-
-    # 5D) Save the model
-    save_path = os.path.join(log_dir, f"{algo_name}_lr={learning_rate}_bs={batch_size}_cs={chunk_size}")
-    model.save(save_path)
-    print(f"[INFO] Model saved to: {save_path}.zip")
-
-    # ------------------------------------------------------------------------
-    # 5E) Test the model on the FULL 1200-step dataset in one go
-    # ------------------------------------------------------------------------
-    test_env = TestEnv(full_speed_data, delta_t=1.0)
-
-    obs, _ = test_env.reset()
-    predicted_speeds = []
-    reference_speeds = []
-    rewards = []
-
-    for _ in range(DATA_LEN):
-        action, _states = model.predict(obs, deterministic=True)
-        obs, reward, terminated, truncated, info = test_env.step(action)
-        predicted_speeds.append(obs[0])  # current_speed
-        reference_speeds.append(obs[1])  # reference_speed
-        rewards.append(reward)
-        if terminated or truncated:
-            break
-
-    avg_test_reward = np.mean(rewards)
-    print(f"[TEST] Average reward over 1200-step test: {avg_test_reward:.3f}")
-    metrics_csv = os.path.join(log_dir, "metrics_summary.csv")
-    compute_metrics(algo_name, chunk_size, learning_rate, batch_size, reference_speeds, predicted_speeds, rewards, total_timesteps, metrics_csv)
-
-
-    # Plot the entire test
-    plt.figure(figsize=(10, 5))
-    plt.plot(reference_speeds, label="Reference Speed", linestyle="--")
-    plt.plot(predicted_speeds, label="Predicted Speed", linestyle="-")
-    plt.xlabel("Timestep")
-    plt.ylabel("Speed (m/s)")
-    plt.title(f"Test on full 1200-step dataset (chunk_size={chunk_size})")
-    plt.legend()
-    plt.tight_layout()
-
-    os.makedirs("images", exist_ok=True)
-    plt.savefig(f"images/{algo_name}_chunksize={chunk_size}_lr={str(learning_rate)}_bs={batch_size}.png")
-
+    # Select test to run
+    if (test == "cli"):
+        run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, total_timesteps, log_dir, logger)
+    elif test == "test1":
+        test1()
+    else:
+        raise ValueError("Invalid test selected!")
 
 if __name__ == "__main__":
     main()
