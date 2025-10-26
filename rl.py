@@ -338,7 +338,7 @@ class ModelEvaluationEnv():
         print(f"Number of episodes: {len(self.episodes_list)} (some leftover if 1200 not divisible by {self.chunk_size})")
 
         # Name of model trained with the unique set of parameters
-        trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_cs={self.chunk_size}.zip"
+        trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_cs={self.chunk_size}_timesteps={self.total_timesteps}.zip"
 
         # Check if pre-trained model exists for the given set of parameters
         # If it doesn't exist, start training
@@ -391,7 +391,7 @@ class ModelEvaluationEnv():
         os.makedirs(self.models_dir, exist_ok=True)
         save_path = os.path.join(self.models_dir, model_name)
         self.model.save(save_path)
-        print(f"[INFO] Model saved to: {save_path}.zip")
+        print(f"[INFO] Model saved to: {save_path}")
 
 # ------------------------------------------------------------------------
 # Declare project tasks based on assignment document
