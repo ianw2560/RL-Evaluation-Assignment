@@ -289,7 +289,7 @@ class ModelEvaluationEnv():
 
         self.model = None
 
-    def compute_metrics(self, reference_speeds, predicted_speeds, rewards):
+    def compute_metrics(self, reference_speeds, predicted_speeds, rewards, filename):
         """
         Compute performance metrics after testing.
         """
@@ -321,7 +321,7 @@ class ModelEvaluationEnv():
             "ConvergenceRate": convergence_rate
         }
 
-        metrics_csv = f"metrics/metrics_summary.csv"
+        metrics_csv = f"metrics/{filename}.csv"
 
         os.makedirs("metrics", exist_ok=True)
         file_exists = os.path.isfile(metrics_csv)
@@ -413,7 +413,7 @@ class ModelEvaluationEnv():
 
         return self.model
 
-    def test(self):
+    def test(self, metrics_summary_filename):
 
         # ------------------------------------------------------------------------
         # 5E) Test the model on the FULL 1200-step dataset in one go
@@ -436,7 +436,7 @@ class ModelEvaluationEnv():
 
         avg_test_reward = np.mean(rewards)
         print(f"[TEST] Average reward over 1200-step test: {avg_test_reward:.3f}")
-        self.compute_metrics(reference_speeds=reference_speeds, predicted_speeds=predicted_speeds, rewards=rewards)
+        self.compute_metrics(reference_speeds=reference_speeds, predicted_speeds=predicted_speeds, rewards=rewards, filename=metrics_summary_filename)
     
 # ------------------------------------------------------------------------
 # Declare project tasks based on assignment document
@@ -451,26 +451,28 @@ def task1():
     # ------------------------------------------------------------------------
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
     batch_sizes = [128, 256, 512, 1024]
+    metrics_summary_filename = "metrics_summary_task1_batchsize_variation"
 
     # SAC, PPO, DDPG
     for algo in algorithms:
         for current_batch in batch_sizes:
             model_env = ModelEvaluationEnv(algo_name=algo, batch_size=current_batch, total_timesteps=timesteps) 
             model_env.train()
-            model_env.test()
+            model_env.test(metrics_summary_filename)
 
     # TD3
     batch_sizes = [64, 128, 256, 512, 1024]
     for current_batch in batch_sizes:
         model_env = ModelEvaluationEnv(algo_name="TD3", batch_size=current_batch, total_timesteps=timesteps) 
         model_env.train()
-        model_env.test()
+        model_env.test(metrics_summary_filename)
 
     # ------------------------------------------------------------------------
     # Try out different learning rates
     # ------------------------------------------------------------------------
     algorithms = ["SAC", "PPO", "DDPG"]
     learning_rates = [1e-3, 1e-4, 3e-4]
+    metrics_summary_filename = "metrics_summary_task1_learningrate_variation"
 
     for algo in algorithms:
         for current_lr in learning_rates:
@@ -479,6 +481,24 @@ def task1():
             else:
                 model_env = ModelEvaluationEnv(algo_name=algo, batch_size=64, learning_rate=current_lr, total_timesteps=timesteps)
 
+            model_env.train()
+            model_env.test(metrics_summary_filename)
+
+def task2():
+    print("Task 2: Episode Length Variation")
+
+    timesteps = 10_000
+
+    # ------------------------------------------------------------------------
+    # Try out different episode lengths
+    # ------------------------------------------------------------------------
+    algorithms = ["SAC", "PPO", "TD3", "DDPG"]
+    episode_lengths = [50, 100, 200, 400]
+    metrics_summary_filename = "metrics_summary_task2_episodelength_variation"
+
+    for algo in algorithms:
+        for length in episode_lengths:
+            model_env = ModelEvaluationEnv(algo_name=algo, total_timesteps=timesteps, chunk_size=length) 
             model_env.train()
             model_env.test()
 
@@ -594,6 +614,8 @@ def main():
         run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, total_timesteps, log_dir)
     elif task == "task1":
         task1()
+    elif task == "task2":
+        task2()
     else:
         raise ValueError("Invalid task selected!")
 
