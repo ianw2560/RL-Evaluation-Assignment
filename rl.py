@@ -124,44 +124,6 @@ def select_algo(algo_name, train_env, device, learning_rate=3e-4, batch_size=256
 
     return model
 
-def compute_metrics(algo_name, chunk_size, learning_rate, batch_size, reference_speeds, predicted_speeds, rewards, total_timesteps, output_csv):
-    """
-    Compute performance metrics after testing.
-    """
-    ref = np.array(reference_speeds)
-    pred = np.array(predicted_speeds)
-
-    mae = mean_absolute_error(ref, pred)
-    mse = mean_squared_error(ref, pred)
-    rmse = np.sqrt(mse)
-
-    # Convergence rate (very rough): average reward improvement per 1k steps
-    # You can refine this later if you log intermediate rewards.
-    convergence_rate = np.mean(rewards[-100:]) - np.mean(rewards[:100])
-    convergence_rate /= total_timesteps / 1000  # normalize per 1k steps
-
-    print(f"[METRICS] MAE={mae:.4f}, MSE={mse:.4f}, RMSE={rmse:.4f}, ConvergenceRate={convergence_rate:.6f}")
-
-    # Append results to CSV
-    fieldnames = ["Algorithm", "ChunkSize", "LearningRate", "BatchSize", "MAE", "MSE", "RMSE", "ConvergenceRate"]
-    new_row = {
-        "Algorithm": algo_name,
-        "ChunkSize": chunk_size,
-        "LearningRate": learning_rate,
-        "BatchSize": batch_size,
-        "MAE": mae,
-        "MSE": mse,
-        "RMSE": rmse,
-        "ConvergenceRate": convergence_rate
-    }
-
-    file_exists = os.path.isfile(output_csv)
-    with open(output_csv, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow(new_row)
-
 # ------------------------------------------------------------------------
 # 3A) Training Environment: picks a random chunk each reset
 # ------------------------------------------------------------------------
@@ -321,10 +283,66 @@ class ModelEvaluationEnv():
         self.log_dir = log_dir
         self.models_dir = models_dir
         self.logger = configure(self.log_dir, ["stdout", "tensorboard"])
+        self.trained_model_name = None
 
         self.episodes_list = chunk_into_episodes(full_speed_data, self.chunk_size)
 
         self.model = None
+
+    def compute_metrics(self, reference_speeds, predicted_speeds, rewards):
+        """
+        Compute performance metrics after testing.
+        """
+
+        ref = np.array(reference_speeds)
+        pred = np.array(predicted_speeds)
+
+        mae = mean_absolute_error(ref, pred)
+        mse = mean_squared_error(ref, pred)
+        rmse = np.sqrt(mse)
+
+        # Convergence rate (very rough): average reward improvement per 1k steps
+        # You can refine this later if you log intermediate rewards.
+        convergence_rate = np.mean(rewards[-100:]) - np.mean(rewards[:100])
+        convergence_rate /= self.total_timesteps / 1000  # normalize per 1k steps
+
+        print(f"[METRICS] MAE={mae:.4f}, MSE={mse:.4f}, RMSE={rmse:.4f}, ConvergenceRate={convergence_rate:.6f}")
+
+        # Append results to CSV
+        fieldnames = ["Algorithm", "ChunkSize", "LearningRate", "BatchSize", "MAE", "MSE", "RMSE", "ConvergenceRate"]
+        new_row = {
+            "Algorithm": self.algo_name,
+            "ChunkSize": self.chunk_size,
+            "LearningRate": self.learning_rate,
+            "BatchSize": self.batch_size,
+            "MAE": mae,
+            "MSE": mse,
+            "RMSE": rmse,
+            "ConvergenceRate": convergence_rate
+        }
+
+        metrics_csv = f"metrics/metrics_summary.csv"
+
+        os.makedirs("metrics", exist_ok=True)
+        file_exists = os.path.isfile(metrics_csv)
+        with open(metrics_csv, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(new_row)
+
+        # Plot the entire test
+        plt.figure(figsize=(10, 5))
+        plt.plot(reference_speeds, label="Reference Speed", linestyle="--")
+        plt.plot(predicted_speeds, label="Predicted Speed", linestyle="-")
+        plt.xlabel("Timestep")
+        plt.ylabel("Speed (m/s)")
+        plt.title(f"Test on full 1200-step dataset (chunk_size={self.chunk_size})")
+        plt.legend()
+        plt.tight_layout()
+
+        os.makedirs("images", exist_ok=True)
+        plt.savefig(f"images/{self.algo_name}_chunksize={self.chunk_size}_lr={str(self.learning_rate)}_bs={self.batch_size}.png")
 
     # ------------------------------------------------------------------------
     # Train a model
@@ -335,16 +353,16 @@ class ModelEvaluationEnv():
         print(f"[INFO] Using chunk_size = {self.chunk_size}")
         print(f"[INFO] Using learning_rate = {self.learning_rate}")
         print(f"[INFO] Using batch_size = {self.batch_size}")
-        print(f"Number of episodes: {len(self.episodes_list)} (some leftover if 1200 not divisible by {self.chunk_size})")
+        print(f"[INFO] Number of episodes: {len(self.episodes_list)} (some leftover if 1200 not divisible by {self.chunk_size})")
 
         # Name of model trained with the unique set of parameters
-        trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_cs={self.chunk_size}_timesteps={self.total_timesteps}.zip"
+        self.trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_cs={self.chunk_size}_timesteps={self.total_timesteps}.zip"
 
         # Check if pre-trained model exists for the given set of parameters
         # If it doesn't exist, start training
-        trained_model_path = f"{self.log_dir}/{trained_model_name}"
-        if os.path.exists(f"{self.log_dir}/{trained_model_name}"):
-            print(f"[INFO] {trained_model_name} already exists! Loading pretrained model")
+        trained_model_path = f"{self.models_dir}/{self.trained_model_name}"
+        if os.path.exists(f"{self.models_dir}/{self.trained_model_name}"):
+            print(f"[INFO] {self.trained_model_name} already exists! Loading pretrained model")
             if self.algo_name == "SAC":
                 self.model = SAC.load(trained_model_path)
             elif self.algo_name == "PPO":
@@ -356,8 +374,8 @@ class ModelEvaluationEnv():
             else:
                 raise ValueError("Invalid algorithm selected!")
         else:
-            print(f"[INFO] {trained_model_name} doesn't exist. Starting training")
-            self.model = self.train_model(trained_model_name)
+            print(f"[INFO] {self.models_dir}/{self.trained_model_name} doesn't exist. Starting training")
+            self.model = self.train_model(self.trained_model_name)
 
     def train_model(self, model_name):
 
@@ -392,6 +410,8 @@ class ModelEvaluationEnv():
         save_path = os.path.join(self.models_dir, model_name)
         self.model.save(save_path)
         print(f"[INFO] Model saved to: {save_path}")
+
+        return self.model
 
 # ------------------------------------------------------------------------
 # Declare project tasks based on assignment document
@@ -472,22 +492,9 @@ def run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, tota
 
     avg_test_reward = np.mean(rewards)
     print(f"[TEST] Average reward over 1200-step test: {avg_test_reward:.3f}")
-    metrics_csv = os.path.join(log_dir, "metrics_summary.csv")
-    compute_metrics(algo_name, chunk_size, learning_rate, batch_size, reference_speeds, predicted_speeds, rewards, total_timesteps, metrics_csv)
+    model_env.compute_metrics(reference_speeds=reference_speeds, predicted_speeds=predicted_speeds, rewards=rewards)
 
 
-    # Plot the entire test
-    plt.figure(figsize=(10, 5))
-    plt.plot(reference_speeds, label="Reference Speed", linestyle="--")
-    plt.plot(predicted_speeds, label="Predicted Speed", linestyle="-")
-    plt.xlabel("Timestep")
-    plt.ylabel("Speed (m/s)")
-    plt.title(f"Test on full 1200-step dataset (chunk_size={chunk_size})")
-    plt.legend()
-    plt.tight_layout()
-
-    os.makedirs("images", exist_ok=True)
-    plt.savefig(f"images/{algo_name}_chunksize={chunk_size}_lr={str(learning_rate)}_bs={batch_size}.png")
 
 # ------------------------------------------------------------------------
 # 5) Main: user sets chunk_size from command line, train, then test
