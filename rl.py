@@ -312,7 +312,7 @@ class CustomLoggingCallback(BaseCallback):
 
 class ModelEvaluationEnv():
 
-    def __init__(self, algo_name, learning_rate, batch_size, total_timesteps, chunk_size, log_dir, logger, episodes_list):
+    def __init__(self, log_dir, logger, algo_name="SAC", learning_rate=3e-4, batch_size=256, total_timesteps=100_000, chunk_size=100):
         self.algo_name = algo_name
         self.learning_rate = learning_rate
         self.batch_size = batch_size
@@ -320,7 +320,7 @@ class ModelEvaluationEnv():
         self.total_timesteps = total_timesteps
         self.log_dir = log_dir
         self.logger = logger
-        self.episodes_list = episodes_list
+        self.episodes_list = chunk_into_episodes(full_speed_data, self.chunk_size)
 
         self.model = None
 
@@ -328,6 +328,13 @@ class ModelEvaluationEnv():
     # Train a model
     # ------------------------------------------------------------------------
     def train(self):
+
+        print(f"[INFO] Using algorithm: {self.algo_name}")
+        print(f"[INFO] Using chunk_size = {self.chunk_size}")
+        print(f"[INFO] Using learning_rate = {self.learning_rate}")
+        print(f"[INFO] Using batch_size = {self.batch_size}")
+        print(f"Number of episodes: {len(self.episodes_list)} (some leftover if 1200 not divisible by {self.chunk_size})")
+
         # Name of model trained with the unique set of parameters
         trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_cs={self.chunk_size}"
 
@@ -336,21 +343,21 @@ class ModelEvaluationEnv():
         trained_model_path = f"{self.log_dir}/{trained_model_name}"
         if os.path.exists(f"{self.log_dir}/{trained_model_name}"):
             print(f"[INFO] {trained_model_name} already exists! Loading pretrained model")
-            if algo_name == "SAC":
+            if self.algo_name == "SAC":
                 self.model = SAC.load(trained_model_path)
-            elif algo_name == "PPO":
+            elif self.algo_name == "PPO":
                 self.model = PPO.load(trained_model_path)
-            elif algo_name == "TD3":
+            elif self.algo_name == "TD3":
                 self.model = TD3.load(trained_model_path)
-            elif algo_name == "DDPG":
+            elif self.algo_name == "DDPG":
                 self.model = DDPG.load(trained_model_path)
             else:
                 raise ValueError("Invalid algorithm selected!")
         else:
             print(f"[INFO] {trained_model_name} doesn't exist. Starting training")
-            self.model = self.train_model()
+            self.model = self.train_model(trained_model_name)
 
-    def train_model(self):
+    def train_model(self, model_name):
 
         # 5B) Create the TRAIN environment
         def make_train_env():
@@ -379,7 +386,7 @@ class ModelEvaluationEnv():
         print(f"[INFO] Training finished in {end_time - start_time:.2f}s")
 
         # 5D) Save the model
-        save_path = os.path.join(self.log_dir, trained_model_name)
+        save_path = os.path.join(self.log_dir, model_name)
         self.model.save(save_path)
         print(f"[INFO] Model saved to: {save_path}.zip")
 
@@ -392,25 +399,18 @@ def task1():
     
 def run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, total_timesteps, log_dir, logger):
 
-    episodes_list = chunk_into_episodes(full_speed_data, chunk_size)
-
-    print(f"[INFO] Using algorithm: {algo_name}")
-    print(f"[INFO] Using chunk_size = {chunk_size}")
-    print(f"[INFO] Using learning_rate = {learning_rate}")
-    print(f"Number of episodes: {len(episodes_list)} (some leftover if 1200 not divisible by {chunk_size})")
-    print(f"[INFO] Using batch_size = {batch_size}")
-
     model_env = ModelEvaluationEnv(algo_name=algo_name, 
                                    batch_size=batch_size,
                                    learning_rate=learning_rate,
                                    chunk_size=chunk_size,
                                    total_timesteps=total_timesteps,
                                    log_dir=log_dir,
-                                   logger=logger,
-                                   episodes_list=episodes_list
+                                   logger=logger
                                    )
 
+    # ------------------------------------------------------------------------
     # Train model based on given parameters
+    # ------------------------------------------------------------------------
     model_env.train()
     model = model_env.model
 
@@ -499,11 +499,11 @@ def main():
         help="Select the total number of time steps."
     )
     parser.add_argument(
-        "--test",
-        dest="test",
+        "--task",
+        dest="task",
         type=str,
         default="cli",
-        help="Select the test to run."
+        help="Select the task to run."
     )
     args = parser.parse_args()
 
@@ -519,15 +519,15 @@ def main():
     
     learning_rate = args.learning_rate
     total_timesteps = args.timesteps
-    test = args.test
+    task = args.task
 
-    # Select test to run
-    if (test == "cli"):
+    # Select task to run
+    if (task == "cli"):
         run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, total_timesteps, log_dir, logger)
-    elif test == "test1":
-        test1()
+    elif task == "task1":
+        task1()
     else:
-        raise ValueError("Invalid test selected!")
+        raise ValueError("Invalid task selected!")
 
 if __name__ == "__main__":
     main()
