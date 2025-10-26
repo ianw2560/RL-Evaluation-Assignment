@@ -413,6 +413,31 @@ class ModelEvaluationEnv():
 
         return self.model
 
+    def test(self):
+
+        # ------------------------------------------------------------------------
+        # 5E) Test the model on the FULL 1200-step dataset in one go
+        # ------------------------------------------------------------------------
+        test_env = TestEnv(full_speed_data, delta_t=1.0)
+
+        obs, _ = test_env.reset()
+        predicted_speeds = []
+        reference_speeds = []
+        rewards = []
+
+        for _ in range(DATA_LEN):
+            action, _states = self.model.predict(obs, deterministic=True)
+            obs, reward, terminated, truncated, info = test_env.step(action)
+            predicted_speeds.append(obs[0])  # current_speed
+            reference_speeds.append(obs[1])  # reference_speed
+            rewards.append(reward)
+            if terminated or truncated:
+                break
+
+        avg_test_reward = np.mean(rewards)
+        print(f"[TEST] Average reward over 1200-step test: {avg_test_reward:.3f}")
+        self.compute_metrics(reference_speeds=reference_speeds, predicted_speeds=predicted_speeds, rewards=rewards)
+    
 # ------------------------------------------------------------------------
 # Declare project tasks based on assignment document
 # ------------------------------------------------------------------------
@@ -432,12 +457,14 @@ def task1():
         for current_batch in batch_sizes:
             model_env = ModelEvaluationEnv(algo_name=algo, batch_size=current_batch, total_timesteps=timesteps) 
             model_env.train()
+            model_env.test()
 
     # TD3
     batch_sizes = [64, 128, 256, 512, 1024]
     for current_batch in batch_sizes:
         model_env = ModelEvaluationEnv(algo_name="TD3", batch_size=current_batch, total_timesteps=timesteps) 
         model_env.train()
+        model_env.test()
 
     # ------------------------------------------------------------------------
     # Try out different learning rates
@@ -453,8 +480,8 @@ def task1():
                 model_env = ModelEvaluationEnv(algo_name=algo, batch_size=64, learning_rate=current_lr, total_timesteps=timesteps)
 
             model_env.train()
+            model_env.test()
 
-    
 def run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, total_timesteps, log_dir):
 
     model_env = ModelEvaluationEnv(algo_name=algo_name, 
@@ -493,8 +520,6 @@ def run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, tota
     avg_test_reward = np.mean(rewards)
     print(f"[TEST] Average reward over 1200-step test: {avg_test_reward:.3f}")
     model_env.compute_metrics(reference_speeds=reference_speeds, predicted_speeds=predicted_speeds, rewards=rewards)
-
-
 
 # ------------------------------------------------------------------------
 # 5) Main: user sets chunk_size from command line, train, then test
