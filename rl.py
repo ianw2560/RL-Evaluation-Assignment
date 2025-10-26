@@ -312,14 +312,16 @@ class CustomLoggingCallback(BaseCallback):
 
 class ModelEvaluationEnv():
 
-    def __init__(self, log_dir, logger, algo_name="SAC", learning_rate=3e-4, batch_size=256, total_timesteps=100_000, chunk_size=100):
+    def __init__(self, log_dir="logs_chunk_training", algo_name="SAC", learning_rate=3e-4, batch_size=256, total_timesteps=100_000, chunk_size=100, models_dir="trained_models"):
         self.algo_name = algo_name
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.chunk_size = chunk_size
         self.total_timesteps = total_timesteps
         self.log_dir = log_dir
-        self.logger = logger
+        self.models_dir = models_dir
+        self.logger = configure(self.log_dir, ["stdout", "tensorboard"])
+
         self.episodes_list = chunk_into_episodes(full_speed_data, self.chunk_size)
 
         self.model = None
@@ -336,7 +338,7 @@ class ModelEvaluationEnv():
         print(f"Number of episodes: {len(self.episodes_list)} (some leftover if 1200 not divisible by {self.chunk_size})")
 
         # Name of model trained with the unique set of parameters
-        trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_cs={self.chunk_size}"
+        trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_cs={self.chunk_size}.zip"
 
         # Check if pre-trained model exists for the given set of parameters
         # If it doesn't exist, start training
@@ -386,7 +388,8 @@ class ModelEvaluationEnv():
         print(f"[INFO] Training finished in {end_time - start_time:.2f}s")
 
         # 5D) Save the model
-        save_path = os.path.join(self.log_dir, model_name)
+        os.makedirs(self.models_dir, exist_ok=True)
+        save_path = os.path.join(self.models_dir, model_name)
         self.model.save(save_path)
         print(f"[INFO] Model saved to: {save_path}.zip")
 
@@ -394,18 +397,52 @@ class ModelEvaluationEnv():
 # Declare project tasks based on assignment document
 # ------------------------------------------------------------------------
 def task1():
-    print("running test 1")
-    pass
+    print("Task 1: Model and Hyperparameter Modifications")
+
+    timesteps = 10_000
+
+    # ------------------------------------------------------------------------
+    # Try out different batch sizes
+    # ------------------------------------------------------------------------
+    algorithms = ["SAC", "PPO", "TD3", "DDPG"]
+    batch_sizes = [128, 256, 512, 1024]
+
+    # SAC, PPO, DDPG
+    for algo in algorithms:
+        for current_batch in batch_sizes:
+            model_env = ModelEvaluationEnv(algo_name=algo, batch_size=current_batch, total_timesteps=timesteps) 
+            model_env.train()
+
+    # TD3
+    batch_sizes = [64, 128, 256, 512, 1024]
+    for current_batch in batch_sizes:
+        model_env = ModelEvaluationEnv(algo_name="TD3", batch_size=current_batch, total_timesteps=timesteps) 
+        model_env.train()
+
+    # ------------------------------------------------------------------------
+    # Try out different learning rates
+    # ------------------------------------------------------------------------
+    algorithms = ["SAC", "PPO", "DDPG"]
+    learning_rates = [1e-3, 1e-4, 3e-4]
+
+    for algo in algorithms:
+        for current_lr in learning_rates:
+            if algo != "PPO":
+                model_env = ModelEvaluationEnv(algo_name=algo, learning_rate=current_lr, total_timesteps=timesteps)
+            else:
+                model_env = ModelEvaluationEnv(algo_name=algo, batch_size=64, learning_rate=current_lr, total_timesteps=timesteps)
+
+            model_env.train()
+
     
-def run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, total_timesteps, log_dir, logger):
+def run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, total_timesteps, log_dir):
 
     model_env = ModelEvaluationEnv(algo_name=algo_name, 
                                    batch_size=batch_size,
                                    learning_rate=learning_rate,
                                    chunk_size=chunk_size,
                                    total_timesteps=total_timesteps,
-                                   log_dir=log_dir,
-                                   logger=logger
+                                   log_dir=log_dir
                                    )
 
     # ------------------------------------------------------------------------
@@ -510,7 +547,6 @@ def main():
     # Create logger
     log_dir = args.output_dir
     os.makedirs(log_dir, exist_ok=True)
-    logger = configure(log_dir, ["stdout", "tensorboard"])
 
     # Parse args
     algo_name = args.algorithm
@@ -523,7 +559,7 @@ def main():
 
     # Select task to run
     if (task == "cli"):
-        run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, total_timesteps, log_dir, logger)
+        run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, total_timesteps, log_dir)
     elif task == "task1":
         task1()
     else:
