@@ -590,9 +590,9 @@ def task1():
             model_env.train()
             model_env.test(metrics_summary_filename)
 
-    plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task1_lr_vs_MAE")
-    plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task1_lr_vs_RMSE")
-    plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_lr_vs_ConvergenceRate")
+    plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task1_lr_vs_MAE", save_dir="task1_images")
+    plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task1_lr_vs_RMSE", save_dir="task1_images")
+    plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_lr_vs_ConvergenceRate", save_dir="task1_images")
 
 def task2():
     print("Task 2: Episode Length Variation")
@@ -612,9 +612,9 @@ def task2():
             model_env.train()
             model_env.test(metrics_summary_filename)
 
-    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task2_episodelength_vs_MAE")
-    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task2_episodelength_vs_RMSE")
-    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_episodelength_vs_ConvergenceRate")
+    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task2_episodelength_vs_MAE", save_dir="task2_images")
+    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task2_episodelength_vs_RMSE", save_dir="task2_images")
+    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_episodelength_vs_ConvergenceRate", save_dir="task2_images")
 
 def run_from_command_line(algo_name, batch_size, episode_len, learning_rate, total_timesteps, log_dir):
 
