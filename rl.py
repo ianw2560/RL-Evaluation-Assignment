@@ -126,8 +126,8 @@ def select_algo(algo_name, train_env, device, learning_rate=3e-4, batch_size=256
 
 def plot_learningrate_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(7, 4)):
     """
-    Plot how batch_size and learning_rate affect a chosen metric
-    for each algorithm from Task 1 results.
+    Plot how learning_rate affects a chosen metric for each algorithm.
+    X-ticks correspond to the actual learning rates tested.
     """
     df = pd.read_csv(csv_path)
     os.makedirs(save_dir, exist_ok=True)
@@ -135,7 +135,6 @@ def plot_learningrate_vs_metric(csv_path, out_name, metric="MAE", save_dir="imag
     algos = df["Algorithm"].unique()
     colors = plt.cm.tab10.colors
 
-    # --- Plot metric vs Learning Rate ---
     plt.figure(figsize=figsize)
     for i, algo in enumerate(algos):
         sub = df[df["Algorithm"] == algo].copy()
@@ -144,22 +143,30 @@ def plot_learningrate_vs_metric(csv_path, out_name, metric="MAE", save_dir="imag
             sub["LearningRate"], sub[metric],
             marker="o", linestyle="-", label=algo, color=colors[i % len(colors)]
         )
+
+    # Set log scale for learning rates
     plt.xscale("log")
+
+    # Set xticks and labels to actual learning rate values
+    lr_values = sorted(df["LearningRate"].unique())
+    plt.xticks(lr_values, [f"{v:.0e}" for v in lr_values])
+
     plt.title(f"{metric} vs Learning Rate")
-    plt.xlabel("Learning Rate (log scale)")
+    plt.xlabel("Learning Rate")
     plt.ylabel(metric)
     plt.grid(alpha=0.3)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, f"{out_name}.png"))
+    plt.savefig(os.path.join(save_dir, f"{out_name}.png"), dpi=300)
     plt.close()
 
     print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
 
+
 def plot_batchsize_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(7, 4)):
     """
-    Plot how batch_size and learning_rate affect a chosen metric
-    for each algorithm from Task 1 results.
+    Plot how batch_size affects a chosen metric for each algorithm.
+    X-ticks correspond to the actual batch sizes tested.
     """
     df = pd.read_csv(csv_path)
     os.makedirs(save_dir, exist_ok=True)
@@ -175,17 +182,21 @@ def plot_batchsize_vs_metric(csv_path, out_name, metric="MAE", save_dir="images"
             sub["BatchSize"], sub[metric],
             marker="o", linestyle="-", label=algo, color=colors[i % len(colors)]
         )
+
+    # Set xticks explicitly to tested batch sizes
+    batch_values = sorted(df["BatchSize"].unique())
+    plt.xticks(batch_values, [str(int(v)) for v in batch_values])
+
     plt.title(f"{metric} vs Batch Size")
     plt.xlabel("Batch Size")
     plt.ylabel(metric)
     plt.grid(alpha=0.3)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, f"{out_name}.png"))
+    plt.savefig(os.path.join(save_dir, f"{out_name}.png"), dpi=300)
     plt.close()
 
     print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
-
 # ------------------------------------------------------------------------
 # 3A) Training Environment: picks a random chunk each reset
 # ------------------------------------------------------------------------
