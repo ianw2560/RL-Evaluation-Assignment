@@ -164,10 +164,7 @@ def plot_learningrate_vs_metric(csv_path, out_name, metric="MAE", save_dir="imag
 
 
 def plot_batchsize_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(7, 4)):
-    """
-    Plot how batch_size affects a chosen metric for each algorithm.
-    X-ticks correspond to the actual batch sizes tested.
-    """
+
     df = pd.read_csv(csv_path)
     os.makedirs(save_dir, exist_ok=True)
 
@@ -199,10 +196,7 @@ def plot_batchsize_vs_metric(csv_path, out_name, metric="MAE", save_dir="images"
     print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
 
 def plot_episodelength_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(7, 4)):
-    """
-    Plot how episode length affects a chosen metric for each algorithm.
-    X-ticks correspond to the actual batch sizes tested.
-    """
+
     df = pd.read_csv(csv_path)
     os.makedirs(save_dir, exist_ok=True)
 
@@ -233,45 +227,109 @@ def plot_episodelength_vs_metric(csv_path, out_name, metric="MAE", save_dir="ima
 
     print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
 
+
+def plot_rewardtype_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(8, 5), clip_outliers=True, percentile_clip=95, annotate=True):
+
+    df = pd.read_csv(csv_path)
+    os.makedirs(save_dir, exist_ok=True)
+
+    if "RewardType" not in df.columns:
+        raise ValueError("CSV file must contain a 'RewardType' column.")
+
+    algos = sorted(df["Algorithm"].unique())
+    reward_types = sorted(df["RewardType"].unique())
+    colors = plt.cm.tab10.colors
+
+    grouped = df.groupby(["RewardType", "Algorithm"], as_index=False)[metric].mean()
+
+    plt.figure(figsize=figsize)
+    bar_width = 0.18
+    x = np.arange(len(reward_types))
+
+    values = grouped[metric].values
+    if clip_outliers:
+        clip_val = np.percentile(values, percentile_clip)
+        grouped[metric] = np.clip(values, None, clip_val)
+        print(f"[INFO] Clipped values above {clip_val:.2f} for {metric}")
+
+    for i, algo in enumerate(algos):
+        sub = grouped[grouped["Algorithm"] == algo]
+        offsets = x + i * bar_width - (bar_width * len(algos) / 2)
+        bars = plt.bar(
+            offsets,
+            sub[metric],
+            width=bar_width,
+            color=colors[i % len(colors)],
+            label=algo,
+            alpha=0.9,
+        )
+
+        if annotate:
+            for bar in bars:
+                height = bar.get_height()
+                if height > 0:
+                    plt.text(
+                        bar.get_x() + bar.get_width() / 2,
+                        height + 0.02 * max(values),
+                        f"{height:.2f}",
+                        ha="center",
+                        va="bottom",
+                        fontsize=8,
+                        rotation=90,
+                    )
+
+    plt.xticks(x, reward_types)
+    plt.title(f"{metric} vs Reward Function Type")
+    plt.xlabel("Reward Function Type")
+    plt.ylabel(metric)
+    plt.grid(axis="y", linestyle="--", alpha=0.4)
+    plt.legend(title="Algorithm", fontsize=9)
+    plt.tight_layout()
+
+    out_path = os.path.join(save_dir, f"{out_name}.png")
+    plt.savefig(out_path, dpi=300)
+    plt.close()
+
+    print(f"[INFO] Saved scaled plot to {out_path} for metric '{metric}'")
+
 # ------------------------------------------------------------------------
 # 3A) Training Environment: picks a random chunk each reset
 # ------------------------------------------------------------------------
 class TrainEnv(gym.Env):
-    """
-    Speed-following training environment:
-      - The dataset is split into episodes of length `chunk_size`.
-      - Each reset(), we pick one chunk at random.
-      - action: acceleration in [-3,3]
-      - observation: [current_speed, reference_speed]
-      - reward: -|current_speed - reference_speed|
-    """
-
-    def __init__(self, episodes_list, delta_t=1.0):
+    def __init__(self, episodes_list, delta_t=1.0, reward_type="abs"):
         super().__init__()
         self.episodes_list = episodes_list
         self.num_episodes = len(episodes_list)
         self.delta_t = delta_t
+        self.reward_type = reward_type
 
-        # Actions, Observations
         self.action_space = spaces.Box(low=-3.0, high=3.0, shape=(1,), dtype=np.float32)
         self.observation_space = spaces.Box(low=0.0, high=50.0, shape=(2,), dtype=np.float32)
 
-        # Episode-specific
         self.current_episode = None
         self.episode_len = 0
         self.step_idx = 0
         self.current_speed = 0.0
         self.ref_speed = 0.0
 
+    def compute_reward(self, error):
+        if self.reward_type == "abs":
+            return -abs(error)
+        elif self.reward_type == "squared":
+            return -(error ** 2)
+        elif self.reward_type == "exp":
+            return -np.exp(min(abs(error), 10)) 
+        elif self.reward_type == "tanh":
+            return -np.tanh(abs(error))
+        else:
+            raise ValueError(f"Unknown reward_type: {self.reward_type}")
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        # Pick random chunk from episodes_list
         ep_idx = np.random.randint(0, self.num_episodes)
         self.current_episode = self.episodes_list[ep_idx]
         self.episode_len = len(self.current_episode)
         self.step_idx = 0
-
-        # Initialize
         self.current_speed = 0.0
         self.ref_speed = self.current_episode[self.step_idx]
 
@@ -282,38 +340,31 @@ class TrainEnv(gym.Env):
     def step(self, action):
         accel = np.clip(action[0], -3.0, 3.0)
         self.current_speed += accel * self.delta_t
-        if self.current_speed < 0:
-            self.current_speed = 0.0
+        self.current_speed = max(self.current_speed, 0.0)
 
         self.ref_speed = self.current_episode[self.step_idx]
         error = abs(self.current_speed - self.ref_speed)
-        reward = -error
+        reward = self.compute_reward(error)
 
         self.step_idx += 1
         terminated = (self.step_idx >= self.episode_len)
         truncated = False
 
         obs = np.array([self.current_speed, self.ref_speed], dtype=np.float32)
-        info = {"speed_error": error}
+        info = {"speed_error": error, "reward_type": self.reward_type}
         return obs, reward, terminated, truncated, info
 
 
 # ------------------------------------------------------------------------
-# 3B) Testing Environment: run entire 1200-step data in one episode
+# 3B) Test Environment with same reward flexibility
 # ------------------------------------------------------------------------
 class TestEnv(gym.Env):
-    """
-    Speed-following testing environment:
-      - We run through the entire 1200-step dataset in one go.
-      - observation: [current_speed, reference_speed]
-      - reward: -|current_speed - reference_speed|
-    """
-
-    def __init__(self, full_data, delta_t=1.0):
+    def __init__(self, full_data, delta_t=1.0, reward_type="abs"):
         super().__init__()
         self.full_data = full_data
         self.n_steps = len(full_data)
         self.delta_t = delta_t
+        self.reward_type = reward_type
 
         self.action_space = spaces.Box(low=-3.0, high=3.0, shape=(1,), dtype=np.float32)
         self.observation_space = spaces.Box(low=0.0, high=50.0, shape=(2,), dtype=np.float32)
@@ -321,6 +372,18 @@ class TestEnv(gym.Env):
         self.idx = 0
         self.current_speed = 0.0
 
+    def compute_reward(self, error):
+        if self.reward_type == "abs":
+            return -abs(error)
+        elif self.reward_type == "squared":
+            return -(error ** 2)
+        elif self.reward_type == "exp":
+            return -np.exp(abs(error))
+        elif self.reward_type == "tanh":
+            return -np.tanh(abs(error))
+        else:
+            raise ValueError(f"Unknown reward_type: {self.reward_type}")
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.idx = 0
@@ -333,21 +396,19 @@ class TestEnv(gym.Env):
     def step(self, action):
         accel = np.clip(action[0], -3.0, 3.0)
         self.current_speed += accel * self.delta_t
-        if self.current_speed < 0:
-            self.current_speed = 0.0
+        self.current_speed = max(self.current_speed, 0.0)
 
         ref_speed = self.full_data[self.idx]
         error = abs(self.current_speed - ref_speed)
-        reward = -error
+        reward = self.compute_reward(error)
 
         self.idx += 1
         terminated = (self.idx >= self.n_steps)
         truncated = False
 
         obs = np.array([self.current_speed, ref_speed], dtype=np.float32)
-        info = {"speed_error": error}
+        info = {"speed_error": error, "reward_type": self.reward_type}
         return obs, reward, terminated, truncated, info
-
 
 # ------------------------------------------------------------------------
 # 4) CustomLoggingCallback (optional)
@@ -383,10 +444,11 @@ class CustomLoggingCallback(BaseCallback):
 
 class ModelEvaluationEnv():
 
-    def __init__(self, log_dir="logs_chunk_training", algo_name="SAC", learning_rate=3e-4, batch_size=256, total_timesteps=100_000, episode_len=100, models_dir="trained_models"):
+    def __init__(self, log_dir="logs_chunk_training", algo_name="SAC", learning_rate=3e-4, batch_size=256, reward_type="abs", total_timesteps=100_000, episode_len=100, models_dir="trained_models"):
         self.algo_name = algo_name
         self.learning_rate = learning_rate
         self.batch_size = batch_size
+        self.reward_type = reward_type
         self.episode_len = episode_len
         self.total_timesteps = total_timesteps
         self.log_dir = log_dir
@@ -418,12 +480,13 @@ class ModelEvaluationEnv():
         print(f"[METRICS] MAE={mae:.4f}, MSE={mse:.4f}, RMSE={rmse:.4f}, ConvergenceRate={convergence_rate:.6f}")
 
         # Append results to CSV
-        fieldnames = ["Algorithm", "EpisodeLength", "LearningRate", "BatchSize", "MAE", "MSE", "RMSE", "ConvergenceRate"]
+        fieldnames = ["Algorithm", "EpisodeLength", "LearningRate", "BatchSize", "RewardType", "MAE", "MSE", "RMSE", "ConvergenceRate"]
         new_row = {
             "Algorithm": self.algo_name,
             "EpisodeLength": self.episode_len,
             "LearningRate": self.learning_rate,
             "BatchSize": self.batch_size,
+            "RewardType": self.reward_type,
             "MAE": mae,
             "MSE": mse,
             "RMSE": rmse,
@@ -451,7 +514,7 @@ class ModelEvaluationEnv():
         plt.tight_layout()
 
         os.makedirs("images", exist_ok=True)
-        plt.savefig(f"images/{self.algo_name}_eplen={self.episode_len}_lr={str(self.learning_rate)}_bs={self.batch_size}.png")
+        plt.savefig(f"images/{self.algo_name}_eplen={self.episode_len}_lr={str(self.learning_rate)}_bs={self.batch_size}_timesteps={self.total_timesteps}.png")
 
     # ------------------------------------------------------------------------
     # Train a model
@@ -459,7 +522,7 @@ class ModelEvaluationEnv():
     def train(self):
 
         # Name of model trained with the unique set of parameters
-        self.trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_el={self.episode_len}_timesteps={self.total_timesteps}.zip"
+        self.trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_el={self.episode_len}_reward={self.reward_type}_timesteps={self.total_timesteps}.zip"
 
         # Check if pre-trained model exists for the given set of parameters
         # If it doesn't exist, start training
@@ -486,11 +549,12 @@ class ModelEvaluationEnv():
         print(f"[INFO] Using episode_len = {self.episode_len}")
         print(f"[INFO] Using learning_rate = {self.learning_rate}")
         print(f"[INFO] Using batch_size = {self.batch_size}")
+        print(f"[INFO] Using reward_type = {self.reward_type}")
         print(f"[INFO] Number of episodes: {len(self.episodes_list)} (some leftover if 1200 not divisible by {self.episode_len})")
 
         # 5B) Create the TRAIN environment
         def make_train_env():
-            return TrainEnv(self.episodes_list, delta_t=1.0)
+            return TrainEnv(self.episodes_list, delta_t=1.0, reward_type=self.reward_type)
 
         train_env = DummyVecEnv([make_train_env])
 
@@ -527,7 +591,7 @@ class ModelEvaluationEnv():
         # ------------------------------------------------------------------------
         # 5E) Test the model on the FULL 1200-step dataset in one go
         # ------------------------------------------------------------------------
-        test_env = TestEnv(full_speed_data, delta_t=1.0)
+        test_env = TestEnv(full_speed_data, delta_t=1.0, reward_type=self.reward_type)
 
         obs, _ = test_env.reset()
         predicted_speeds = []
@@ -553,7 +617,7 @@ class ModelEvaluationEnv():
 def task1():
     print("Task 1: Model and Hyperparameter Modifications")
 
-    timesteps = 10_000
+    timesteps = 1_000
 
     # ------------------------------------------------------------------------
     # Try out different batch sizes
@@ -597,7 +661,7 @@ def task1():
 def task2():
     print("Task 2: Episode Length Variation")
 
-    timesteps = 10_000
+    timesteps = 100_000
 
     # ------------------------------------------------------------------------
     # Try out different episode lengths
@@ -614,13 +678,53 @@ def task2():
 
     plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task2_episodelength_vs_MAE", save_dir="task2_images")
     plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task2_episodelength_vs_RMSE", save_dir="task2_images")
-    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_episodelength_vs_ConvergenceRate", save_dir="task2_images")
+    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task2_episodelength_vs_ConvergenceRate", save_dir="task2_images")
 
-def run_from_command_line(algo_name, batch_size, episode_len, learning_rate, total_timesteps, log_dir):
+def task3():
+    print("Task 3: Reward Structure Adjustments")
+
+    timesteps = 100_000
+
+    # ------------------------------------------------------------------------
+    # Try out reward types lengths
+    # ------------------------------------------------------------------------
+    algorithms = ["SAC", "PPO", "DDPG", "TD3"]
+    rewards = ["abs", "squared", "exp", "tanh"]
+    metrics_summary_filename = "metrics_summary_task3_reward_type_variation"
+
+    for algo in algorithms:
+        for current_reward in rewards:
+            model_env = ModelEvaluationEnv(algo_name=algo, total_timesteps=timesteps, reward_type=current_reward) 
+            model_env.train()
+            model_env.test(metrics_summary_filename)
+
+    plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task3_rewards_vs_MAE", save_dir="task3_images")
+    plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task3_rewards_vs_RMSE", save_dir="task3_images")
+    plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task3_rewards_vs_ConvergenceRate", save_dir="task3_images")
+
+    # ------------------------------------------------------------------------
+    # Try out different episode lengths
+    # ------------------------------------------------------------------------
+    # algorithms = ["SAC", "PPO", "DDPG"]
+    # rewards = ["exp"]
+    # metrics_summary_filename = "metrics_summary_task3_exp_reward_type_variation"
+
+    # for algo in algorithms:
+    #     for current_reward in rewards:
+    #         model_env = ModelEvaluationEnv(algo_name=algo, total_timesteps=timesteps, reward_type=current_reward) 
+    #         model_env.train()
+    #         model_env.test(metrics_summary_filename)
+
+    # plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task3_exp_reward_vs_MAE", save_dir="task3_images")
+    # plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task3_exp_reward_vs_RMSE", save_dir="task3_images")
+    # plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task3_exp_reward_vs_ConvergenceRate", save_dir="task3_images")
+
+def run_from_command_line(algo_name, batch_size, episode_len, learning_rate, reward_type, total_timesteps, log_dir):
 
     model_env = ModelEvaluationEnv(algo_name=algo_name, 
                                    batch_size=batch_size,
                                    learning_rate=learning_rate,
+                                   reward_type=reward_type,
                                    episode_len=episode_len,
                                    total_timesteps=total_timesteps,
                                    log_dir=log_dir
@@ -708,6 +812,13 @@ def main():
         default="cli",
         help="Select the task to run."
     )
+    parser.add_argument(
+        "--reward_type",
+        type=str,
+        default="abs",
+        choices=["abs", "squared", "exp", "tanh"],
+        help="Select the reward function type (abs, squared, exp, tanh)."
+    )
     args = parser.parse_args()
 
     # Create logger
@@ -725,11 +836,13 @@ def main():
 
     # Select task to run
     if (task == "cli"):
-        run_from_command_line(algo_name, batch_size, episode_len, learning_rate, total_timesteps, log_dir)
+        run_from_command_line(algo_name, batch_size, episode_len, learning_rate, reward_type, total_timesteps, log_dir)
     elif task == "task1":
         task1()
     elif task == "task2":
         task2()
+    elif task == "task3":
+        task3()
     else:
         raise ValueError("Invalid task selected!")
 
