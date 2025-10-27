@@ -132,10 +132,7 @@ def plot_learningrate_vs_metric(csv_path, out_name, metric="MAE", save_dir="imag
     df = pd.read_csv(csv_path)
     os.makedirs(save_dir, exist_ok=True)
 
-    print(df)
-
     algos = df["Algorithm"].unique()
-    print("Unique Algos:", algos)
     colors = plt.cm.tab10.colors
 
     # --- Plot metric vs Learning Rate ---
@@ -167,13 +164,9 @@ def plot_batchsize_vs_metric(csv_path, out_name, metric="MAE", save_dir="images"
     df = pd.read_csv(csv_path)
     os.makedirs(save_dir, exist_ok=True)
 
-    print(df)
-
     algos = df["Algorithm"].unique()
-    print("Unique Algos:", algos)
     colors = plt.cm.tab10.colors
 
-    # --- Plot metric vs Batch Size ---
     plt.figure(figsize=figsize)
     for i, algo in enumerate(algos):
         sub = df[df["Algorithm"] == algo].copy()
