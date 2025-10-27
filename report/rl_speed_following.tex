@@ -1,0 +1,104 @@
+\documentclass[11pt]{article}
+
+% --- Packages ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{siunitx}   % for numbers/units in tables
+\usepackage{xcolor}
+\usepackage{listings}  % code listings (minted avoided for portability)
+
+% --- Page Setup ---
+\geometry{
+  a4paper,
+  margin=1in
+}
+
+% % Math macros for metrics
+% \newcommand{\MAE}{\mathrm{MAE}}
+% \newcommand{\MSE}{\mathrm{MSE}}
+% \newcommand{\RMSE}{\mathrm{RMSE}}
+
+% --- Metadata ---
+\title{RL Speed Following Assignment Report}
+\author{Ian Wallace}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Model and Hyperparameter Modifications}
+\subsection{Search Space}
+We tune learning rate, batch size, buffer size, entropy/coefficient (where applicable), target noise (TD3/DDPG), and gamma/GAE (PPO).
+\begin{table}[h]
+  \centering
+  \caption{Hyperparameter grid / ranges explored.}
+  \label{tab:hparams}
+  \begin{tabular}{|l|c|c|c|}
+    \hline
+    \textbf{Parameter} & \textbf{Values Tested} & \textbf{Best (Val)} & \textbf{Notes} \\
+    \hline
+    Learning rate & \num{1e-4}, \num{3e-4}, \num{1e-3} & \num{3e-4} & \\
+    Batch size    & 128, 256, 512                   & 256            & \\
+    Buffer size   & 1e5, 5e5, 1e6                   & 5e5            & \\
+    Entropy coeff (SAC) & 0.05, 0.1, auto           & auto           & \\
+    PPO clip      & 0.1, 0.2                        & 0.2            & \\
+    TD3 noise std & 0.1, 0.2                        & 0.1            & \\
+    \hline
+  \end{tabular}
+\end{table}
+
+\subsection{Implementation Notes}
+Briefly describe any architectural or configuration changes (e.g., network width/depth, activation functions).
+
+
+\section{Episode Length Variations}
+We modify the dataloader to accept an episode length $L$ as a runtime parameter. We test $L \in \{50, 100, 200\}$ and report how $L$ influences stability, sample efficiency, and final error.
+
+\begin{table}[h]
+  \centering
+  \caption{Effect of episode length on performance (illustrative placeholders).}
+  \label{tab:chunks}
+  \begin{tabular}{lcccc}
+    \hline
+    \textbf{Algo} & \textbf{$L$} & \textbf{Final MAE} & \textbf{Convergence Steps} & \textbf{Notes}\\
+    \hline
+    SAC  & 50  & 0.XXX & NNNK & \\
+    SAC  & 100 & 0.XXX & NNNK & \\
+    SAC  & 200 & 0.XXX & NNNK & \\
+    PPO  & 50  & 0.XXX & NNNK & \\
+    \hline
+  \end{tabular}
+\end{table}
+
+% \begin{figure}[h!]
+%   \centering
+%   \includegraphics[width=0.7\textwidth]{example-image}
+%   \caption{Example figure caption.}
+%   \label{fig:example}
+% \end{figure}
+
+% \begin{table}[h!]
+%   \centering
+%   \begin{tabular}{lcc}
+%     \textbf{Item} & \textbf{Value 1} & \textbf{Value 2} \\
+%     A & 10 & 20 \\
+%     B & 15 & 25 \\ \hline
+%   \end{tabular}
+%   \caption{Example table.}
+%   \label{tab:example}
+% \end{table}
+
+\section{Conclusion}
+Summarize your findings and future directions.
+
+\end{document}
