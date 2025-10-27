@@ -197,6 +197,42 @@ def plot_batchsize_vs_metric(csv_path, out_name, metric="MAE", save_dir="images"
     plt.close()
 
     print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
+
+def plot_episodelength_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(7, 4)):
+    """
+    Plot how episode length affects a chosen metric for each algorithm.
+    X-ticks correspond to the actual batch sizes tested.
+    """
+    df = pd.read_csv(csv_path)
+    os.makedirs(save_dir, exist_ok=True)
+
+    algos = df["Algorithm"].unique()
+    colors = plt.cm.tab10.colors
+
+    plt.figure(figsize=figsize)
+    for i, algo in enumerate(algos):
+        sub = df[df["Algorithm"] == algo].copy()
+        sub = sub.groupby("EpisodeLength", as_index=False)[metric].mean().sort_values("EpisodeLength")
+        plt.plot(
+            sub["EpisodeLength"], sub[metric],
+            marker="o", linestyle="-", label=algo, color=colors[i % len(colors)]
+        )
+
+    # Set xticks explicitly to tested batch sizes
+    batch_values = sorted(df["EpisodeLength"].unique())
+    plt.xticks(batch_values, [str(int(v)) for v in batch_values])
+
+    plt.title(f"{metric} vs Episode Length")
+    plt.xlabel("Episode Length")
+    plt.ylabel(metric)
+    plt.grid(alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, f"{out_name}.png"), dpi=300)
+    plt.close()
+
+    print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
+
 # ------------------------------------------------------------------------
 # 3A) Training Environment: picks a random chunk each reset
 # ------------------------------------------------------------------------
@@ -347,18 +383,18 @@ class CustomLoggingCallback(BaseCallback):
 
 class ModelEvaluationEnv():
 
-    def __init__(self, log_dir="logs_chunk_training", algo_name="SAC", learning_rate=3e-4, batch_size=256, total_timesteps=100_000, chunk_size=100, models_dir="trained_models"):
+    def __init__(self, log_dir="logs_chunk_training", algo_name="SAC", learning_rate=3e-4, batch_size=256, total_timesteps=100_000, episode_len=100, models_dir="trained_models"):
         self.algo_name = algo_name
         self.learning_rate = learning_rate
         self.batch_size = batch_size
-        self.chunk_size = chunk_size
+        self.episode_len = episode_len
         self.total_timesteps = total_timesteps
         self.log_dir = log_dir
         self.models_dir = models_dir
         self.logger = configure(self.log_dir, ["stdout", "tensorboard"])
         self.trained_model_name = None
 
-        self.episodes_list = chunk_into_episodes(full_speed_data, self.chunk_size)
+        self.episodes_list = chunk_into_episodes(full_speed_data, self.episode_len)
 
         self.model = None
 
@@ -382,10 +418,10 @@ class ModelEvaluationEnv():
         print(f"[METRICS] MAE={mae:.4f}, MSE={mse:.4f}, RMSE={rmse:.4f}, ConvergenceRate={convergence_rate:.6f}")
 
         # Append results to CSV
-        fieldnames = ["Algorithm", "ChunkSize", "LearningRate", "BatchSize", "MAE", "MSE", "RMSE", "ConvergenceRate"]
+        fieldnames = ["Algorithm", "EpisodeLength", "LearningRate", "BatchSize", "MAE", "MSE", "RMSE", "ConvergenceRate"]
         new_row = {
             "Algorithm": self.algo_name,
-            "ChunkSize": self.chunk_size,
+            "EpisodeLength": self.episode_len,
             "LearningRate": self.learning_rate,
             "BatchSize": self.batch_size,
             "MAE": mae,
@@ -410,12 +446,12 @@ class ModelEvaluationEnv():
         plt.plot(predicted_speeds, label="Predicted Speed", linestyle="-")
         plt.xlabel("Timestep")
         plt.ylabel("Speed (m/s)")
-        plt.title(f"Test on full 1200-step dataset (chunk_size={self.chunk_size})")
+        plt.title(f"Test on full 1200-step dataset (episode_len={self.episode_len})")
         plt.legend()
         plt.tight_layout()
 
         os.makedirs("images", exist_ok=True)
-        plt.savefig(f"images/{self.algo_name}_chunksize={self.chunk_size}_lr={str(self.learning_rate)}_bs={self.batch_size}.png")
+        plt.savefig(f"images/{self.algo_name}_eplen={self.episode_len}_lr={str(self.learning_rate)}_bs={self.batch_size}.png")
 
     # ------------------------------------------------------------------------
     # Train a model
@@ -423,7 +459,7 @@ class ModelEvaluationEnv():
     def train(self):
 
         # Name of model trained with the unique set of parameters
-        self.trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_cs={self.chunk_size}_timesteps={self.total_timesteps}.zip"
+        self.trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_el={self.episode_len}_timesteps={self.total_timesteps}.zip"
 
         # Check if pre-trained model exists for the given set of parameters
         # If it doesn't exist, start training
@@ -447,10 +483,10 @@ class ModelEvaluationEnv():
     def train_model(self, model_name):
 
         print(f"[INFO] Using algorithm: {self.algo_name}")
-        print(f"[INFO] Using chunk_size = {self.chunk_size}")
+        print(f"[INFO] Using episode_len = {self.episode_len}")
         print(f"[INFO] Using learning_rate = {self.learning_rate}")
         print(f"[INFO] Using batch_size = {self.batch_size}")
-        print(f"[INFO] Number of episodes: {len(self.episodes_list)} (some leftover if 1200 not divisible by {self.chunk_size})")
+        print(f"[INFO] Number of episodes: {len(self.episodes_list)} (some leftover if 1200 not divisible by {self.episode_len})")
 
         # 5B) Create the TRAIN environment
         def make_train_env():
@@ -537,7 +573,6 @@ def task1():
     plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task1_batchsize_vs_RMSE")
     plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_batchsize_vs_ConvergenceRate")
 
-
     # ------------------------------------------------------------------------
     # Try out different learning rates
     # ------------------------------------------------------------------------
@@ -573,16 +608,20 @@ def task2():
 
     for algo in algorithms:
         for length in episode_lengths:
-            model_env = ModelEvaluationEnv(algo_name=algo, total_timesteps=timesteps, chunk_size=length) 
+            model_env = ModelEvaluationEnv(algo_name=algo, total_timesteps=timesteps, episode_len=length) 
             model_env.train()
             model_env.test(metrics_summary_filename)
 
-def run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, total_timesteps, log_dir):
+    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task2_episodelength_vs_MAE")
+    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task2_episodelength_vs_RMSE")
+    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_episodelength_vs_ConvergenceRate")
+
+def run_from_command_line(algo_name, batch_size, episode_len, learning_rate, total_timesteps, log_dir):
 
     model_env = ModelEvaluationEnv(algo_name=algo_name, 
                                    batch_size=batch_size,
                                    learning_rate=learning_rate,
-                                   chunk_size=chunk_size,
+                                   episode_len=episode_len,
                                    total_timesteps=total_timesteps,
                                    log_dir=log_dir
                                    )
@@ -617,7 +656,7 @@ def run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, tota
     model_env.compute_metrics(reference_speeds=reference_speeds, predicted_speeds=predicted_speeds, rewards=rewards)
 
 # ------------------------------------------------------------------------
-# 5) Main: user sets chunk_size from command line, train, then test
+# 5) Main: user sets episode_len from command line, train, then test
 # ------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
@@ -628,7 +667,7 @@ def main():
         help="Directory to store logs and trained model."
     )
     parser.add_argument(
-        "--chunk_size",
+        "--episode_len",
         type=int,
         default=100,
         help="Episode length for training (e.g. 50, 100, 200)."
@@ -678,7 +717,7 @@ def main():
     # Parse args
     algo_name = args.algorithm
     batch_size = args.batch_size
-    chunk_size = args.chunk_size
+    episode_len = args.episode_len
     
     learning_rate = args.learning_rate
     total_timesteps = args.timesteps
@@ -686,7 +725,7 @@ def main():
 
     # Select task to run
     if (task == "cli"):
-        run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, total_timesteps, log_dir)
+        run_from_command_line(algo_name, batch_size, episode_len, learning_rate, total_timesteps, log_dir)
     elif task == "task1":
         task1()
     elif task == "task2":
