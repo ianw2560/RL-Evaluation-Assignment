@@ -124,6 +124,75 @@ def select_algo(algo_name, train_env, device, learning_rate=3e-4, batch_size=256
 
     return model
 
+def plot_learningrate_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(7, 4)):
+    """
+    Plot how batch_size and learning_rate affect a chosen metric
+    for each algorithm from Task 1 results.
+    """
+    df = pd.read_csv(csv_path)
+    os.makedirs(save_dir, exist_ok=True)
+
+    print(df)
+
+    algos = df["Algorithm"].unique()
+    print("Unique Algos:", algos)
+    colors = plt.cm.tab10.colors
+
+    # --- Plot metric vs Learning Rate ---
+    plt.figure(figsize=figsize)
+    for i, algo in enumerate(algos):
+        sub = df[df["Algorithm"] == algo].copy()
+        sub = sub.groupby("LearningRate", as_index=False)[metric].mean().sort_values("LearningRate")
+        plt.plot(
+            sub["LearningRate"], sub[metric],
+            marker="o", linestyle="-", label=algo, color=colors[i % len(colors)]
+        )
+    plt.xscale("log")
+    plt.title(f"{metric} vs Learning Rate")
+    plt.xlabel("Learning Rate (log scale)")
+    plt.ylabel(metric)
+    plt.grid(alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, f"{out_name}.png"))
+    plt.close()
+
+    print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
+
+def plot_batchsize_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(7, 4)):
+    """
+    Plot how batch_size and learning_rate affect a chosen metric
+    for each algorithm from Task 1 results.
+    """
+    df = pd.read_csv(csv_path)
+    os.makedirs(save_dir, exist_ok=True)
+
+    print(df)
+
+    algos = df["Algorithm"].unique()
+    print("Unique Algos:", algos)
+    colors = plt.cm.tab10.colors
+
+    # --- Plot metric vs Batch Size ---
+    plt.figure(figsize=figsize)
+    for i, algo in enumerate(algos):
+        sub = df[df["Algorithm"] == algo].copy()
+        sub = sub.groupby("BatchSize", as_index=False)[metric].mean().sort_values("BatchSize")
+        plt.plot(
+            sub["BatchSize"], sub[metric],
+            marker="o", linestyle="-", label=algo, color=colors[i % len(colors)]
+        )
+    plt.title(f"{metric} vs Batch Size")
+    plt.xlabel("Batch Size")
+    plt.ylabel(metric)
+    plt.grid(alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, f"{out_name}.png"))
+    plt.close()
+
+    print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
+
 # ------------------------------------------------------------------------
 # 3A) Training Environment: picks a random chunk each reset
 # ------------------------------------------------------------------------
@@ -349,12 +418,6 @@ class ModelEvaluationEnv():
     # ------------------------------------------------------------------------
     def train(self):
 
-        print(f"[INFO] Using algorithm: {self.algo_name}")
-        print(f"[INFO] Using chunk_size = {self.chunk_size}")
-        print(f"[INFO] Using learning_rate = {self.learning_rate}")
-        print(f"[INFO] Using batch_size = {self.batch_size}")
-        print(f"[INFO] Number of episodes: {len(self.episodes_list)} (some leftover if 1200 not divisible by {self.chunk_size})")
-
         # Name of model trained with the unique set of parameters
         self.trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_cs={self.chunk_size}_timesteps={self.total_timesteps}.zip"
 
@@ -378,6 +441,12 @@ class ModelEvaluationEnv():
             self.model = self.train_model(self.trained_model_name)
 
     def train_model(self, model_name):
+
+        print(f"[INFO] Using algorithm: {self.algo_name}")
+        print(f"[INFO] Using chunk_size = {self.chunk_size}")
+        print(f"[INFO] Using learning_rate = {self.learning_rate}")
+        print(f"[INFO] Using batch_size = {self.batch_size}")
+        print(f"[INFO] Number of episodes: {len(self.episodes_list)} (some leftover if 1200 not divisible by {self.chunk_size})")
 
         # 5B) Create the TRAIN environment
         def make_train_env():
@@ -453,24 +522,22 @@ def task1():
     batch_sizes = [128, 256, 512, 1024]
     metrics_summary_filename = "metrics_summary_task1_batchsize_variation"
 
-    # SAC, PPO, DDPG
     for algo in algorithms:
         for current_batch in batch_sizes:
             model_env = ModelEvaluationEnv(algo_name=algo, batch_size=current_batch, total_timesteps=timesteps) 
             model_env.train()
             model_env.test(metrics_summary_filename)
 
-    # TD3
-    batch_sizes = [64, 128, 256, 512, 1024]
-    for current_batch in batch_sizes:
-        model_env = ModelEvaluationEnv(algo_name="TD3", batch_size=current_batch, total_timesteps=timesteps) 
-        model_env.train()
-        model_env.test(metrics_summary_filename)
+
+    plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task1_batchsize_vs_MAE")
+    plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task1_batchsize_vs_RMSE")
+    plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_batchsize_vs_ConvergenceRate")
+
 
     # ------------------------------------------------------------------------
     # Try out different learning rates
     # ------------------------------------------------------------------------
-    algorithms = ["SAC", "PPO", "DDPG"]
+    algorithms = ["SAC", "PPO", "TD3", "DDPG"]
     learning_rates = [1e-3, 1e-4, 3e-4]
     metrics_summary_filename = "metrics_summary_task1_learningrate_variation"
 
@@ -483,6 +550,10 @@ def task1():
 
             model_env.train()
             model_env.test(metrics_summary_filename)
+
+    plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task1_lr_vs_MAE")
+    plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task1_lr_vs_RMSE")
+    plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_lr_vs_ConvergenceRate")
 
 def task2():
     print("Task 2: Episode Length Variation")
@@ -500,7 +571,7 @@ def task2():
         for length in episode_lengths:
             model_env = ModelEvaluationEnv(algo_name=algo, total_timesteps=timesteps, chunk_size=length) 
             model_env.train()
-            model_env.test()
+            model_env.test(metrics_summary_filename)
 
 def run_from_command_line(algo_name, batch_size, chunk_size, learning_rate, total_timesteps, log_dir):
 
