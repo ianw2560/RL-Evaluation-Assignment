@@ -51,7 +51,7 @@ def chunk_into_episodes(data, chunk_size):
         start = end
     return episodes
 
-def select_algo(algo_name, train_env, device, learning_rate=3e-4, batch_size=256):
+def select_algo(algo_name, train_env, device, learning_rate=3e-4, batch_size=256, sac_ent_coef="auto", ppo_ent_coef=0.0):
 
     policy_kwargs = dict(net_arch=[256, 256], activation_fn=nn.ReLU)
 
@@ -69,7 +69,7 @@ def select_algo(algo_name, train_env, device, learning_rate=3e-4, batch_size=256
             buffer_size=200000,
             tau=0.005,
             gamma=0.99,
-            ent_coef='auto',
+            ent_coef=sac_ent_coef,
         )
     elif algo_name == "PPO":
         model = PPO(
@@ -85,7 +85,7 @@ def select_algo(algo_name, train_env, device, learning_rate=3e-4, batch_size=256
             gamma=0.99,
             gae_lambda=0.95,
             clip_range=0.2,
-            ent_coef=0.0,
+            ent_coef=ppo_ent_coef,
         )
     elif algo_name == "TD3":
         model = TD3(
@@ -228,7 +228,7 @@ def plot_episodelength_vs_metric(csv_path, out_name, metric="MAE", save_dir="ima
     print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
 
 
-def plot_rewardtype_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(8, 5), clip_outliers=True, percentile_clip=95, annotate=True):
+def plot_rewardtype_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(10, 8), clip_outliers=True, percentile_clip=95, annotate=True):
 
     df = pd.read_csv(csv_path)
     os.makedirs(save_dir, exist_ok=True)
@@ -242,55 +242,107 @@ def plot_rewardtype_vs_metric(csv_path, out_name, metric="MAE", save_dir="images
 
     grouped = df.groupby(["RewardType", "Algorithm"], as_index=False)[metric].mean()
 
-    plt.figure(figsize=figsize)
-    bar_width = 0.18
-    x = np.arange(len(reward_types))
-
-    values = grouped[metric].values
+    # Clip outliers globally (helps if one extreme value causes blowout)
     if clip_outliers:
-        clip_val = np.percentile(values, percentile_clip)
-        grouped[metric] = np.clip(values, None, clip_val)
+        clip_val = np.percentile(grouped[metric], percentile_clip)
+        grouped[metric] = np.clip(grouped[metric], None, clip_val)
         print(f"[INFO] Clipped values above {clip_val:.2f} for {metric}")
 
-    for i, algo in enumerate(algos):
-        sub = grouped[grouped["Algorithm"] == algo]
-        offsets = x + i * bar_width - (bar_width * len(algos) / 2)
-        bars = plt.bar(
-            offsets,
+    # Create subplot grid (2x2)
+    n_subplots = len(reward_types)
+    n_rows, n_cols = 2, 2
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+    axes = axes.flatten()
+
+    for idx, reward in enumerate(reward_types):
+        ax = axes[idx]
+        sub = grouped[grouped["RewardType"] == reward]
+
+        x = np.arange(len(algos))
+        bar_width = 0.6
+
+        bars = ax.bar(
+            x,
             sub[metric],
-            width=bar_width,
-            color=colors[i % len(colors)],
-            label=algo,
+            color=[colors[i % len(colors)] for i in range(len(algos))],
             alpha=0.9,
+            width=bar_width,
         )
 
+        # Annotate values
         if annotate:
-            for bar in bars:
-                height = bar.get_height()
-                if height > 0:
-                    plt.text(
+            for bar, val in zip(bars, sub[metric]):
+                if val > 0:
+                    ax.text(
                         bar.get_x() + bar.get_width() / 2,
-                        height + 0.02 * max(values),
-                        f"{height:.2f}",
+                        val + 0.02 * max(sub[metric]),
+                        f"{val:.2f}",
                         ha="center",
                         va="bottom",
-                        fontsize=8,
-                        rotation=90,
+                        fontsize=8
                     )
 
-    plt.xticks(x, reward_types)
-    plt.title(f"{metric} vs Reward Function Type")
-    plt.xlabel("Reward Function Type")
-    plt.ylabel(metric)
-    plt.grid(axis="y", linestyle="--", alpha=0.4)
-    plt.legend(title="Algorithm", fontsize=9)
-    plt.tight_layout()
+        # Local scaling per subplot
+        local_max = max(sub[metric])
+        ax.set_ylim(0, local_max * 1.15)
 
+        ax.set_title(f"{reward} Reward", fontsize=11)
+        ax.set_xticks(x)
+        ax.set_xticklabels(algos, rotation=45, fontsize=9)
+        ax.set_ylabel(metric)
+        ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+    # Remove empty subplots (if < 4 reward types)
+    for j in range(len(reward_types), len(axes)):
+        fig.delaxes(axes[j])
+
+    # Overall title
+    fig.suptitle(f"{metric} Comparison Across Reward Functions", fontsize=14, y=0.98)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+    # Save combined figure
     out_path = os.path.join(save_dir, f"{out_name}.png")
     plt.savefig(out_path, dpi=300)
     plt.close()
 
-    print(f"[INFO] Saved scaled plot to {out_path} for metric '{metric}'")
+    print(f"[INFO] Saved multi-subplot comparison to {out_path}")
+
+def plot_entropy_vs_metric(csv_path, out_name, algo, metric="MAE", save_dir="images", figsize=(7, 4)):
+
+    df = pd.read_csv(csv_path)
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Filter by algorithm
+    sub = df[df["Algorithm"] == algo].copy()
+
+    # Handle missing or mixed types in EntCoef column
+    sub["EntCoef"] = sub["EntCoef"].astype(str)
+    sub = sub.groupby("EntCoef", as_index=False)[metric].mean().sort_values("EntCoef")
+
+    # Plot
+    plt.figure(figsize=figsize)
+    bars = plt.bar(sub["EntCoef"], sub[metric], alpha=0.75, label=algo, color="C0")
+
+    # Add horizontal text labels above bars
+    for bar in bars:
+        height = bar.get_height()
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            height * 1.01,  # a bit above the bar
+            f"{height:.3f}",
+            ha="center", va="bottom", fontsize=9, rotation=0
+        )
+
+    plt.title(f"{algo}: {metric} vs Entropy Coefficient")
+    plt.xlabel("Entropy Coefficient")
+    plt.ylabel(metric)
+    plt.grid(alpha=0.3, axis="y")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, f"{out_name}.png"), dpi=300)
+    plt.close()
+
+    print(f"[INFO] Saved plot to {save_dir}/{out_name}.png for metric '{metric}'")
 
 # ------------------------------------------------------------------------
 # 3A) Training Environment: picks a random chunk each reset
@@ -378,7 +430,7 @@ class TestEnv(gym.Env):
         elif self.reward_type == "squared":
             return -(error ** 2)
         elif self.reward_type == "exp":
-            return -np.exp(abs(error))
+            return -np.exp(abs(error) / 10)
         elif self.reward_type == "tanh":
             return -np.tanh(abs(error))
         else:
@@ -444,11 +496,21 @@ class CustomLoggingCallback(BaseCallback):
 
 class ModelEvaluationEnv():
 
-    def __init__(self, log_dir="logs_chunk_training", algo_name="SAC", learning_rate=3e-4, batch_size=256, reward_type="abs", total_timesteps=100_000, episode_len=100, models_dir="trained_models"):
+    def __init__(self, log_dir="logs_chunk_training", algo_name="SAC", learning_rate=3e-4, batch_size=256, reward_type="abs", sac_ent_coef="auto", ppo_ent_coef=0.0, total_timesteps=100_000, episode_len=100, models_dir="trained_models"):
         self.algo_name = algo_name
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.reward_type = reward_type
+        self.sac_ent_coef = sac_ent_coef
+        self.ppo_ent_coef = ppo_ent_coef
+
+        if self.algo_name == "SAC":
+            self.ent_coef = sac_ent_coef
+        elif self.algo_name == "PPO":
+            self.ent_coef = ppo_ent_coef
+        else:
+            self.ent_coef = None
+
         self.episode_len = episode_len
         self.total_timesteps = total_timesteps
         self.log_dir = log_dir
@@ -480,13 +542,14 @@ class ModelEvaluationEnv():
         print(f"[METRICS] MAE={mae:.4f}, MSE={mse:.4f}, RMSE={rmse:.4f}, ConvergenceRate={convergence_rate:.6f}")
 
         # Append results to CSV
-        fieldnames = ["Algorithm", "EpisodeLength", "LearningRate", "BatchSize", "RewardType", "MAE", "MSE", "RMSE", "ConvergenceRate"]
+        fieldnames = ["Algorithm", "EpisodeLength", "LearningRate", "BatchSize", "EntCoef", "RewardType", "MAE", "MSE", "RMSE", "ConvergenceRate"]
         new_row = {
             "Algorithm": self.algo_name,
             "EpisodeLength": self.episode_len,
             "LearningRate": self.learning_rate,
             "BatchSize": self.batch_size,
             "RewardType": self.reward_type,
+            "EntCoef": self.ent_coef,
             "MAE": mae,
             "MSE": mse,
             "RMSE": rmse,
@@ -514,7 +577,7 @@ class ModelEvaluationEnv():
         plt.tight_layout()
 
         os.makedirs("images", exist_ok=True)
-        plt.savefig(f"images/{self.algo_name}_eplen={self.episode_len}_lr={str(self.learning_rate)}_bs={self.batch_size}_timesteps={self.total_timesteps}.png")
+        plt.savefig(f"images/{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_el={self.episode_len}_entcoef={self.ent_coef}_reward={self.reward_type}_timesteps={self.total_timesteps}.png")
 
     # ------------------------------------------------------------------------
     # Train a model
@@ -522,7 +585,7 @@ class ModelEvaluationEnv():
     def train(self):
 
         # Name of model trained with the unique set of parameters
-        self.trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_el={self.episode_len}_reward={self.reward_type}_timesteps={self.total_timesteps}.zip"
+        self.trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_el={self.episode_len}_entcoef={self.ent_coef}_reward={self.reward_type}_timesteps={self.total_timesteps}.zip"
 
         # Check if pre-trained model exists for the given set of parameters
         # If it doesn't exist, start training
@@ -628,14 +691,14 @@ def task1():
 
     for algo in algorithms:
         for current_batch in batch_sizes:
+
             model_env = ModelEvaluationEnv(algo_name=algo, batch_size=current_batch, total_timesteps=timesteps) 
             model_env.train()
             model_env.test(metrics_summary_filename)
 
-
-    plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task1_batchsize_vs_MAE")
-    plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task1_batchsize_vs_RMSE")
-    plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_batchsize_vs_ConvergenceRate")
+    plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task1_batchsize_vs_MAE", save_dir="task1_images")
+    plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task1_batchsize_vs_RMSE", save_dir="task1_images")
+    plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_batchsize_vs_ConvergenceRate", save_dir="task1_images")
 
     # ------------------------------------------------------------------------
     # Try out different learning rates
@@ -657,6 +720,33 @@ def task1():
     plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task1_lr_vs_MAE", save_dir="task1_images")
     plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task1_lr_vs_RMSE", save_dir="task1_images")
     plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_lr_vs_ConvergenceRate", save_dir="task1_images")
+
+    # ------------------------------------------------------------------------
+    # Try out different entropy coefficients
+    # ------------------------------------------------------------------------
+    metrics_summary_filename = "metrics_summary_task1_ent_coefficient_variation"
+
+    # SAC
+    ent_coefficients = ["auto", 0.0, 0.005, 0.01, 0.05, 0.1]
+    for ent in ent_coefficients:
+        model_env = ModelEvaluationEnv(algo_name="SAC", batch_size=64, learning_rate=current_lr, total_timesteps=timesteps, sac_ent_coef=ent)
+        model_env.train()
+        model_env.test(metrics_summary_filename)
+
+    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="SAC", metric="MAE", out_name="task1_SAC_entropy_vs_MAE", save_dir="task1_images")
+    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="SAC", metric="RMSE", out_name="task1_SAC_entropy_vs_RMSE", save_dir="task1_images")
+    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="SAC", metric="ConvergenceRate", out_name="task1_SAC_entropy_vs_ConvergenceRate", save_dir="task1_images")
+
+    # PPO
+    ent_coefficients = [0.0, 0.005, 0.01, 0.05, 0.1]
+    for ent in ent_coefficients:
+        model_env = ModelEvaluationEnv(algo_name="PPO", batch_size=64, learning_rate=current_lr, total_timesteps=timesteps, ppo_ent_coef=ent)
+        model_env.train()
+        model_env.test(metrics_summary_filename)
+
+    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="PPO", metric="MAE", out_name="task1_PPO_entropy_vs_MAE", save_dir="task1_images")
+    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="PPO", metric="RMSE", out_name="task1_PPO_entropy_vs_RMSE", save_dir="task1_images")
+    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="PPO", metric="ConvergenceRate", out_name="task1_PPO_entropy_vs_ConvergenceRate", save_dir="task1_images")
 
 def task2():
     print("Task 2: Episode Length Variation")
