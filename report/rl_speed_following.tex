@@ -1,6 +1,5 @@
 \documentclass[11pt]{article}
 
-% --- Packages ---
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
@@ -16,18 +15,11 @@
 \usepackage{xcolor}
 \usepackage{listings}  % code listings (minted avoided for portability)
 
-% --- Page Setup ---
 \geometry{
   a4paper,
   margin=1in
 }
 
-% % Math macros for metrics
-% \newcommand{\MAE}{\mathrm{MAE}}
-% \newcommand{\MSE}{\mathrm{MSE}}
-% \newcommand{\RMSE}{\mathrm{RMSE}}
-
-% --- Metadata ---
 \title{RL Speed Following Assignment Report}
 \author{Ian Wallace}
 \date{\today}
@@ -36,49 +28,174 @@
 
 \maketitle
 
+\section{Performance Metrics and Visualization}
+In order to evaluate the different models, we used a variety of different performance metrics commonly used in evaluating reinforcement learning models. Mean Absolute Error (MAE) measures the average deviation between the predicted and target values. This metric gauges the model’s overall accuracy in tracking the reference data without overemphasizing large errors. Mean Squared Error (MSE) the average squared value between the predicted and target values. This metric penalizes larger mistakes more heavily, this is makes it an effective metric for identifying instability or extremes. Root Mean Squared Error (RMSE) serves as a scale-preserving variant of MSE, expressing the error in the same units as the original variable, which makes it more interpretable when comparing performance across models or reward structures. Convergence rate measures how quickly the model converges. This helps gauge how efficiently a model can be trained. Together, these metrics quantify different aspects of model training and performance, providing multiple ways to interpret the quality of model for a given dataset or task. The formal definition for the metrics used in this paper can be found in Section \ref{sec:metric-definitions}. Additionally, we only used RMSE as opposed to using both RMSE and MSE, in order to simplify the analysis.
+
+\subsection{Metric Definitions}\label{sec:metric-definitions}
+
+Given prediction values $y_i$ and references values $x_i$ from $i=\{1,\dots,n\}$:
+
+\begin{align}\label{align:defs}
+\text{MAE} &= \frac{1}{n} \sum_{i=1}^n |y_i - x_i| \\
+\text{MSE} &= \frac{1}{n} \sum_{i=1}^n (y_i - x_i)^2 \\
+\text{RMSE} &= \sqrt{\text{MSE}}
+\end{align}
+
+% \textbf{Convergence rate} is reported as the training step at which a metric (e.g., MAE) first drops below a threshold $\tau$ and stays below for $K$ successive evaluations.
+
 \section{Model and Hyperparameter Modifications}
-\subsection{Search Space}
-We tune learning rate, batch size, buffer size, entropy/coefficient (where applicable), target noise (TD3/DDPG), and gamma/GAE (PPO).
-\begin{table}[h]
+
+In this section, we explore how different models and hyperparemeter changes effect the performance of each of the models analyzed. We tested the following models: SAC, PPO, TD3, DDPG. The hyperparemeters we chose to explore were learning rate, batch size, and entropy coeficient. We trained each model over a range of the different hyperparemeters. When modifying a given hyperparemeter, we kept the other ones at a default value. For example, when iterating over different values for the learning rate, we kept batch size at 256 and the entropy coefficient at the default value for each model (\texttt{auto} for SAC and $0.0$ for PPO). The values chosen to test for each Hyperparameter can be seen in Table \ref{tab:hyperparemeters}.
+
+\begin{table}%[htb]
   \centering
-  \caption{Hyperparameter grid / ranges explored.}
-  \label{tab:hparams}
-  \begin{tabular}{|l|c|c|c|}
+
+  \begin{tabular}{|l|c|}
     \hline
-    \textbf{Parameter} & \textbf{Values Tested} & \textbf{Best (Val)} & \textbf{Notes} \\
+    \textbf{Parameter} & \textbf{Values Tested} \\
     \hline
-    Learning rate & \num{1e-4}, \num{3e-4}, \num{1e-3} & \num{3e-4} & \\
-    Batch size    & 128, 256, 512                   & 256            & \\
-    Buffer size   & 1e5, 5e5, 1e6                   & 5e5            & \\
-    Entropy coeff (SAC) & 0.05, 0.1, auto           & auto           & \\
-    PPO clip      & 0.1, 0.2                        & 0.2            & \\
-    TD3 noise std & 0.1, 0.2                        & 0.1            & \\
+    Learning rate & \num{1e-4}, \num{3e-4}, \num{1e-3} \\
+    Batch size    & 64, 128, 256, 512                  \\
+    Entropy coefficients (SAC)  & 0.0, 0.005, 0.01, 0.05, 0.1, auto \\
+    Entropy coefficients (PPO)  & 0.0, 0.005, 0.01, 0.05, 0.1 \\
     \hline
   \end{tabular}
+  \caption{Hyperparameters explored}
+  \label{tab:hyperparemeters}
 \end{table}
 
-\subsection{Implementation Notes}
-Briefly describe any architectural or configuration changes (e.g., network width/depth, activation functions).
+In Figure \ref{fig:hypvsmetrics}, we compare batch size and learning to our three different metrics.
+Starting with Figure \ref{fig:hypvsmetrics}a, PPO and SAC show decreasing MAE as the learning rate increases, suggesting faster yet stable convergence. TD3 and DDPG show increasing MAE, indicating that higher learning rates destabilize these models. This contrast shows that on-policy methods benefit from slightly more aggressive learning, while off-policy algorithms require smaller step sizes for precision. Figure \ref{fig:hypvsmetrics}c, shows similar results to Figure \ref{fig:hypvsmetrics}a.
+
+In Figure \ref{fig:hypvsmetrics}b, MAE remains flat for SAC and PPO, showing little influence from batch size. However, TD3 and DDPG fluctuate when being trained with smaller batches. This emphasizes that batch-size sensitivity is primarily an issue for these models. Figure \ref{fig:hypvsmetrics}d that is the RMSE metric shows similar results. 
+
+Figure \ref{fig:hypvsmetrics}e, shows convergence rate improving across all models with an increase in learning rate. In Figure \ref{fig:hypvsmetrics}f, we see batch size compared to convergence rate. Covergence rate is erratic at smaller batch sizes for TD3 and DDPG, however, larger batches do stabilize the convergence rate. This is in contrast to SAC and PPO, which demonstrate a steady change in convergence rate across all batch sizes, showing that they are robust to batch size variation. This robustness is seen when comparing batch size to MAE and RMSE for these models as well.
+
+
+
+\begin{figure}[h!]
+  \centering
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../task1_images/task1_lr_vs_MAE.png}
+    \caption*{(a) Learning rate vs MAE}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../task1_images/task1_batchsize_vs_MAE.png}
+    \caption*{(b) Batch size vs MAE}
+  \end{minipage}
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../task1_images/task1_lr_vs_RMSE.png}
+    \caption*{(c) Learning rate vs RMSE}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../task1_images/task1_batchsize_vs_RMSE.png}
+    \caption*{(d) Batch size vs RMSE}
+  \end{minipage}
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../task1_images/task1_lr_vs_ConvergenceRate.png}
+    \caption*{(e) Learning rate vs convergence rate}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../task1_images/task1_batchsize_vs_ConvergenceRate.png}
+    \caption*{(f) Batch size vs convergence rate}
+  \end{minipage}
+  \caption{Comparison of each modified hyperparemeters vs metrics for each model.}
+  \label{fig:hypvsmetrics}
+\end{figure}
+
+
+In Figure \ref{fig:ent_coef_vs_mae}a we compare different entropy coefficient values vs MAE for the SAC model. MAE is lowest when the entropy coefficient is 0.0 and increases for both small nonzero and “auto” values. In Figure \ref{fig:ent_coef_vs_mae}b we compare different entropy coefficient values vs MAE for the PPO model. MAE also increases at higher entropy coefficients, peaking around 0.01, before decreasing slightly at larger values. PPO appears to perform best with little to no added entropy.
+
+\begin{figure}[h!]
+  \centering
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../task1_images/task1_SAC_entropy_vs_MAE.png}
+    \caption*{(a) Different entropy coefficient values vs MAE for SAC model.}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../task1_images/task1_PPO_entropy_vs_MAE.png}
+    \caption*{(b) Different entropy coefficient values vs MAE for PPO model.}
+  \end{minipage}
+  \caption{Comparison of each modified hyperparemeters vs metrics for each model.}
+  \label{fig:ent_coef_vs_mae}
+\end{figure}
+
+Finally, Figure \ref{fig:pred_vs_ref} shows the predicted versus reference speed for each model, where each model is trained using the best set of parameters as found in the previous hyperparemeter exploration.
+
+\begin{figure}[h!]
+  \centering
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../images/SAC_lr=0.0003_bs=256_el=100_entcoef=auto_reward=abs_timesteps=100000.png}
+    \caption*{(a) SAC: batch size = 256, learning rate = 0.001, entropy coefficient = 0}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.0_reward=abs_timesteps=100000.png}
+    \caption*{(b) PPO: batch size = 64, learning rate = 0.0003, entropy coefficient = 0.005}
+  \end{minipage}
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../images/TD3_lr=0.0001_bs=256_el=100_entcoef=None_reward=abs_timesteps=100000.png}
+    \caption*{(c) TD3: batch size = 128, learning rate = 0.0001, entropy coefficient = N/A}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../images/DDPG_lr=0.0003_bs=64_el=100_entcoef=None_reward=abs_timesteps=100000.png}
+    \caption*{(d) DDPG: batch size = 64, learning rate = 0.0001, entropy coefficient = N/A}
+  \end{minipage}
+  \caption{Predicted vs reference speeds of the best parameter for both learning rate and batch size for each model.}
+  \label{fig:pred_vs_ref}
+\end{figure}
 
 
 \section{Episode Length Variations}
-We modify the dataloader to accept an episode length $L$ as a runtime parameter. We test $L \in \{50, 100, 200\}$ and report how $L$ influences stability, sample efficiency, and final error.
 
-\begin{table}[h]
+Here, we modify the code to train the models using different episode lengths. The different lengths we tested are 50, 100, 200, and 400. As shown in Figure \ref{fig:eps_vs_metrics},SAC and PPO show little variation in both MAE and RMSE across different episode length values. This is in contrast to TD3 and DDPG, which appear to vary significantly across episode length values. TD3 and DDPG both perform the best at a value of 50, while DDPG performs that worst at an epsiode length of 400 and and TD3 performs worst at episode length of 100. Longer episodes yield higher convergence rates for DDPG and TD3, but this comes at the cost of larger error variability. SAC and PPO converge more smoothly, with low but steady improvement across lengths. Overall, shorter episodes favor stability, while longer ones accelerate convergence.
+
+
+% \begin{table}[h]
+%   \centering
+%   \caption{Effect of episode length on performance (illustrative placeholders).}
+%   \label{tab:chunks}
+%   \begin{tabular}{lcccc}
+%     \hline
+%     \textbf{Algo} & \textbf{$L$} & \textbf{Final MAE} & \textbf{Convergence Steps} & \textbf{Notes}\\
+%     \hline
+%     SAC  & 50  & 0.XXX & NNNK & \\
+%     SAC  & 100 & 0.XXX & NNNK & \\
+%     SAC  & 200 & 0.XXX & NNNK & \\
+%     PPO  & 50  & 0.XXX & NNNK & \\
+%     \hline
+%   \end{tabular}
+% \end{table}
+
+\begin{figure}[h!]
   \centering
-  \caption{Effect of episode length on performance (illustrative placeholders).}
-  \label{tab:chunks}
-  \begin{tabular}{lcccc}
-    \hline
-    \textbf{Algo} & \textbf{$L$} & \textbf{Final MAE} & \textbf{Convergence Steps} & \textbf{Notes}\\
-    \hline
-    SAC  & 50  & 0.XXX & NNNK & \\
-    SAC  & 100 & 0.XXX & NNNK & \\
-    SAC  & 200 & 0.XXX & NNNK & \\
-    PPO  & 50  & 0.XXX & NNNK & \\
-    \hline
-  \end{tabular}
-\end{table}
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../task2_images/task2_episodelength_vs_MAE.png}
+    \caption*{(a) Episode length vs MAE}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../task2_images/task2_episodelength_vs_RMSE.png}
+    \caption*{(b) Episode length vs RMSE}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../task2_images/task2_episodelength_vs_ConvergenceRate.png}
+    \caption*{(c) Episode length vs convergence rate}
+  \end{minipage}
+  \caption{Comparison of episode length vs selected metrics for each model.}
+  \label{fig:eps_vs_metrics}
+\end{figure}
+
+
+\section{Reward Structure Analysis}
+
+We will now explore how modifying the default reward function included with the original code impacts the results.
 
 % \begin{figure}[h!]
 %   \centering
