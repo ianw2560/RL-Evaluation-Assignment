@@ -134,16 +134,16 @@ Finally, Figure \ref{fig:pred_vs_ref} shows the predicted versus reference speed
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.0_reward=abs_timesteps=100000.png}
+    \includegraphics[width=\textwidth]{../images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.005_reward=abs_timesteps=100000.png}
     \caption*{(b) PPO: batch size = 64, learning rate = 0.0003, entropy coefficient = 0.005}
   \end{minipage}
   \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../images/TD3_lr=0.0001_bs=256_el=100_entcoef=None_reward=abs_timesteps=100000.png}
+    \includegraphics[width=\textwidth]{../images/TD3_lr=0.0001_bs=128_el=100_entcoef=None_reward=abs_timesteps=100000.png}
     \caption*{(c) TD3: batch size = 128, learning rate = 0.0001, entropy coefficient = N/A}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../images/DDPG_lr=0.0003_bs=64_el=100_entcoef=None_reward=abs_timesteps=100000.png}
+    \includegraphics[width=\textwidth]{../images/DDPG_lr=0.0001_bs=64_el=100_entcoef=None_reward=abs_timesteps=100000.png}
     \caption*{(d) DDPG: batch size = 64, learning rate = 0.0001, entropy coefficient = N/A}
   \end{minipage}
   \caption{Predicted vs reference speeds of the best parameter for both learning rate and batch size for each model.}
@@ -153,24 +153,8 @@ Finally, Figure \ref{fig:pred_vs_ref} shows the predicted versus reference speed
 
 \section{Episode Length Variations}
 
-Here, we modify the code to train the models using different episode lengths. The different lengths we tested are 50, 100, 200, and 400. As shown in Figure \ref{fig:eps_vs_metrics},SAC and PPO show little variation in both MAE and RMSE across different episode length values. This is in contrast to TD3 and DDPG, which appear to vary significantly across episode length values. TD3 and DDPG both perform the best at a value of 50, while DDPG performs that worst at an epsiode length of 400 and and TD3 performs worst at episode length of 100. Longer episodes yield higher convergence rates for DDPG and TD3, but this comes at the cost of larger error variability. SAC and PPO converge more smoothly, with low but steady improvement across lengths. Overall, shorter episodes favor stability, while longer ones accelerate convergence.
+Here, we modify the code to train the models using different episode lengths. The different lengths we tested are 50, 100, 200, and 400. As shown in Figure \ref{fig:eps_vs_metrics}, SAC and PPO show little variation in both MAE and RMSE across different episode length values. This is in contrast to TD3 and DDPG, which appear to vary significantly across episode length values. TD3 and DDPG both perform the best at a value of 50, while DDPG performs that worst at an epsiode length of 400 and and TD3 performs worst at episode length of 100. Longer episodes yield higher convergence rates for DDPG and TD3, but this comes at the cost of larger error variability. SAC and PPO converge more smoothly, with low but steady improvement across lengths. Overall, shorter episodes favor stability, while longer ones accelerate convergence.
 
-
-% \begin{table}[h]
-%   \centering
-%   \caption{Effect of episode length on performance (illustrative placeholders).}
-%   \label{tab:chunks}
-%   \begin{tabular}{lcccc}
-%     \hline
-%     \textbf{Algo} & \textbf{$L$} & \textbf{Final MAE} & \textbf{Convergence Steps} & \textbf{Notes}\\
-%     \hline
-%     SAC  & 50  & 0.XXX & NNNK & \\
-%     SAC  & 100 & 0.XXX & NNNK & \\
-%     SAC  & 200 & 0.XXX & NNNK & \\
-%     PPO  & 50  & 0.XXX & NNNK & \\
-%     \hline
-%   \end{tabular}
-% \end{table}
 
 \begin{figure}[h!]
   \centering
@@ -192,30 +176,32 @@ Here, we modify the code to train the models using different episode lengths. Th
   \label{fig:eps_vs_metrics}
 \end{figure}
 
-
+\newpage
 \section{Reward Structure Analysis}
 
 We will now explore how modifying the default reward function included with the original code impacts the results.
+To do this, we added analyzed four total reward functions, including the original reward function included with the code: absolute value, squared, and exponential functions.
 
-% \begin{figure}[h!]
-%   \centering
-%   \includegraphics[width=0.7\textwidth]{example-image}
-%   \caption{Example figure caption.}
-%   \label{fig:example}
-% \end{figure}
+Given an error value $x$ and a reward value $r$, the reward functions utilized in this study are defined as follows:
 
-% \begin{table}[h!]
-%   \centering
-%   \begin{tabular}{lcc}
-%     \textbf{Item} & \textbf{Value 1} & \textbf{Value 2} \\
-%     A & 10 & 20 \\
-%     B & 15 & 25 \\ \hline
-%   \end{tabular}
-%   \caption{Example table.}
-%   \label{tab:example}
-% \end{table}
+\begin{align}
+\text{Absolute value:  } r &= -|x| \\
+\text{Squared: } r &= -(x^2) \\
+\text{Exponential: } r &= -e^{\text{min}(|x|, 10)}
+\end{align}
 
+In Figure \ref{fig:reward_vs_mae}, we compare the calculated MAE for each model across three different reward functions. For the absolute value reward function, we found that PPO and SAC performed the best, while TD3 and DDPG performed the worst. For the exponential reward function, DDPG, SAC, and TD3 performed fairly similar, with PPO being the worst as an outlier. A similar result occured for the squared reward function, however, this time it was the TD3 reward function that performed the worst.
+
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=\textwidth]{../task3_images/task3_rewards_vs_MAE.png}
+  \caption{Comparison of reward fucntion vs MAE for each model.}
+  \label{fig:reward_vs_mae}
+\end{figure}
+
+\newpage
 \section{Conclusion}
-Summarize your findings and future directions.
+
+This report compared four reinforcement learning algorithms: SAC, PPO, TD3, and DDPG. These algorithms were compared across multiple hyperparameter configurations in order to evaluate their performance in speed following. The metrics selected to analyze the different parameter confiugrations were MAE, RMSE and convergence rate. PPO and SAC consistently achieved lower error and smoother convergence, while TD3 and DDPG showed greater sensitivity to hyperparameters. On-policy methods, such as PPO and SAC, tolerated higher learning rates and smaller batch sizes, whereas off-policy methods, such as TD3 and DDPG, required more conservative parameters in order to achieve stable learning. Varying episode length revealed that PPO and SAC maintained stable performance across all episode lengths, unlike TD3 and DDPG, which exhibited greater variability. Finally, reward function exploration showed that smooth, convex rewards, such as absolute or squared, enhanced stability for stochastic methods, while the exponential reward function favored deterministic agents. Overall, PPO and SAC seemed to perform the best overall and in the most configurations.
 
 \end{document}

@@ -371,8 +371,6 @@ class TrainEnv(gym.Env):
             return -(error ** 2)
         elif self.reward_type == "exp":
             return -np.exp(min(abs(error), 10)) 
-        elif self.reward_type == "tanh":
-            return -np.tanh(abs(error))
         else:
             raise ValueError(f"Unknown reward_type: {self.reward_type}")
 
@@ -430,9 +428,7 @@ class TestEnv(gym.Env):
         elif self.reward_type == "squared":
             return -(error ** 2)
         elif self.reward_type == "exp":
-            return -np.exp(abs(error) / 10)
-        elif self.reward_type == "tanh":
-            return -np.tanh(abs(error))
+            return -np.exp(min(abs(error), 10))
         else:
             raise ValueError(f"Unknown reward_type: {self.reward_type}")
 
@@ -680,13 +676,13 @@ class ModelEvaluationEnv():
 def task1():
     print("Task 1: Model and Hyperparameter Modifications")
 
-    timesteps = 1_000
+    timesteps = 100_000
 
     # ------------------------------------------------------------------------
     # Try out different batch sizes
     # ------------------------------------------------------------------------
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
-    batch_sizes = [128, 256, 512, 1024]
+    batch_sizes = [64, 128, 256, 512]
     metrics_summary_filename = "metrics_summary_task1_batchsize_variation"
 
     for algo in algorithms:
@@ -704,7 +700,7 @@ def task1():
     # Try out different learning rates
     # ------------------------------------------------------------------------
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
-    learning_rates = [1e-3, 1e-4, 3e-4]
+    learning_rates = [1e-4, 3e-4, 1e-3]
     metrics_summary_filename = "metrics_summary_task1_learningrate_variation"
 
     for algo in algorithms:
@@ -720,6 +716,31 @@ def task1():
     plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task1_lr_vs_MAE", save_dir="task1_images")
     plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task1_lr_vs_RMSE", save_dir="task1_images")
     plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_lr_vs_ConvergenceRate", save_dir="task1_images")
+
+    # ------------------------------------------------------------------------
+    # Get reference vs predicted for bets set of hyperparameters for each model
+    # ------------------------------------------------------------------------
+    metrics_summary_filename = "metrics_summary_task1_best_hyperparameters"
+
+    # SAC
+    model_env = ModelEvaluationEnv(algo_name="SAC", learning_rate=1e-3, batch_size=256, sac_ent_coef=0.0, total_timesteps=timesteps)
+    model_env.train()
+    model_env.test(metrics_summary_filename)
+
+    # PPO
+    model_env = ModelEvaluationEnv(algo_name="PPO", learning_rate=3e-4, batch_size=64, ppo_ent_coef=0.005, total_timesteps=timesteps)
+    model_env.train()
+    model_env.test(metrics_summary_filename)
+
+    # TD3
+    model_env = ModelEvaluationEnv(algo_name="TD3", learning_rate=1e-4, batch_size=128, total_timesteps=timesteps)
+    model_env.train()
+    model_env.test(metrics_summary_filename)
+
+    # DDPG
+    model_env = ModelEvaluationEnv(algo_name="DDPG", learning_rate=1e-4, batch_size=64, total_timesteps=timesteps)
+    model_env.train()
+    model_env.test(metrics_summary_filename)
 
     # ------------------------------------------------------------------------
     # Try out different entropy coefficients
@@ -757,7 +778,7 @@ def task2():
     # Try out different episode lengths
     # ------------------------------------------------------------------------
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
-    episode_lengths = [50, 100, 200, 400]
+    episode_lengths = [50, 100, 200, 300, 400]
     metrics_summary_filename = "metrics_summary_task2_episodelength_variation"
 
     for algo in algorithms:
@@ -779,7 +800,7 @@ def task3():
     # Try out reward types lengths
     # ------------------------------------------------------------------------
     algorithms = ["SAC", "PPO", "DDPG", "TD3"]
-    rewards = ["abs", "squared", "exp", "tanh"]
+    rewards = ["abs", "squared", "exp"]
     metrics_summary_filename = "metrics_summary_task3_reward_type_variation"
 
     for algo in algorithms:
@@ -791,23 +812,6 @@ def task3():
     plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task3_rewards_vs_MAE", save_dir="task3_images")
     plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task3_rewards_vs_RMSE", save_dir="task3_images")
     plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task3_rewards_vs_ConvergenceRate", save_dir="task3_images")
-
-    # ------------------------------------------------------------------------
-    # Try out different episode lengths
-    # ------------------------------------------------------------------------
-    # algorithms = ["SAC", "PPO", "DDPG"]
-    # rewards = ["exp"]
-    # metrics_summary_filename = "metrics_summary_task3_exp_reward_type_variation"
-
-    # for algo in algorithms:
-    #     for current_reward in rewards:
-    #         model_env = ModelEvaluationEnv(algo_name=algo, total_timesteps=timesteps, reward_type=current_reward) 
-    #         model_env.train()
-    #         model_env.test(metrics_summary_filename)
-
-    # plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task3_exp_reward_vs_MAE", save_dir="task3_images")
-    # plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task3_exp_reward_vs_RMSE", save_dir="task3_images")
-    # plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task3_exp_reward_vs_ConvergenceRate", save_dir="task3_images")
 
 def run_from_command_line(algo_name, batch_size, episode_len, learning_rate, reward_type, total_timesteps, log_dir):
 
@@ -906,8 +910,8 @@ def main():
         "--reward_type",
         type=str,
         default="abs",
-        choices=["abs", "squared", "exp", "tanh"],
-        help="Select the reward function type (abs, squared, exp, tanh)."
+        choices=["abs", "squared", "exp"],
+        help="Select the reward function type (abs, squared, exp)."
     )
     args = parser.parse_args()
 

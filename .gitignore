@@ -4,4 +4,5 @@
 *.toc
 *.log
 *.fls
-
+logs_chunk_training/
+trained_models/
