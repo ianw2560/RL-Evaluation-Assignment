@@ -518,7 +518,7 @@ class ModelEvaluationEnv():
 
         self.model = None
 
-    def compute_metrics(self, reference_speeds, predicted_speeds, rewards, filename):
+    def compute_metrics(self, reference_speeds, predicted_speeds, rewards, avg_reward, filename):
         """
         Compute performance metrics after testing.
         """
@@ -535,10 +535,10 @@ class ModelEvaluationEnv():
         convergence_rate = np.mean(rewards[-100:]) - np.mean(rewards[:100])
         convergence_rate /= self.total_timesteps / 1000  # normalize per 1k steps
 
-        print(f"[METRICS] MAE={mae:.4f}, MSE={mse:.4f}, RMSE={rmse:.4f}, ConvergenceRate={convergence_rate:.6f}")
+        print(f"[METRICS] MAE={mae:.4f}, MSE={mse:.4f}, RMSE={rmse:.4f}, AvgReward={avg_reward:.4f}, ConvergenceRate={convergence_rate:.6f}")
 
         # Append results to CSV
-        fieldnames = ["Algorithm", "EpisodeLength", "LearningRate", "BatchSize", "EntCoef", "RewardType", "MAE", "MSE", "RMSE", "ConvergenceRate"]
+        fieldnames = ["Algorithm", "EpisodeLength", "LearningRate", "BatchSize", "EntCoef", "RewardType", "MAE", "MSE", "RMSE", "AvgReward", "ConvergenceRate"]
         new_row = {
             "Algorithm": self.algo_name,
             "EpisodeLength": self.episode_len,
@@ -549,6 +549,7 @@ class ModelEvaluationEnv():
             "MAE": mae,
             "MSE": mse,
             "RMSE": rmse,
+            "AvgReward": avg_reward,
             "ConvergenceRate": convergence_rate
         }
 
@@ -609,6 +610,7 @@ class ModelEvaluationEnv():
         print(f"[INFO] Using learning_rate = {self.learning_rate}")
         print(f"[INFO] Using batch_size = {self.batch_size}")
         print(f"[INFO] Using reward_type = {self.reward_type}")
+        print(f"[INFO] Using entropy coefficient = {self.ent_coef}")
         print(f"[INFO] Number of episodes: {len(self.episodes_list)} (some leftover if 1200 not divisible by {self.episode_len})")
 
         # 5B) Create the TRAIN environment
@@ -668,19 +670,22 @@ class ModelEvaluationEnv():
 
         avg_test_reward = np.mean(rewards)
         print(f"[TEST] Average reward over 1200-step test: {avg_test_reward:.3f}")
-        self.compute_metrics(reference_speeds=reference_speeds, predicted_speeds=predicted_speeds, rewards=rewards, filename=metrics_summary_filename)
+        self.compute_metrics(reference_speeds=reference_speeds, predicted_speeds=predicted_speeds, rewards=rewards, avg_reward=avg_test_reward, filename=metrics_summary_filename)
     
 # ------------------------------------------------------------------------
 # Declare project tasks based on assignment document
 # ------------------------------------------------------------------------
 def task1():
     print("Task 1: Model and Hyperparameter Modifications")
+    
 
     timesteps = 100_000
 
     # ------------------------------------------------------------------------
     # Try out different batch sizes
     # ------------------------------------------------------------------------
+    print("Task 1: Batch size changes")
+
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
     batch_sizes = [64, 128, 256, 512]
     metrics_summary_filename = "metrics_summary_task1_batchsize_variation"
@@ -699,6 +704,8 @@ def task1():
     # ------------------------------------------------------------------------
     # Try out different learning rates
     # ------------------------------------------------------------------------
+    print("Task 1: Learning rate changes")
+
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
     learning_rates = [1e-4, 3e-4, 1e-3]
     metrics_summary_filename = "metrics_summary_task1_learningrate_variation"
@@ -720,6 +727,7 @@ def task1():
     # ------------------------------------------------------------------------
     # Get reference vs predicted for bets set of hyperparameters for each model
     # ------------------------------------------------------------------------
+    
     metrics_summary_filename = "metrics_summary_task1_best_hyperparameters"
 
     # SAC
@@ -745,12 +753,14 @@ def task1():
     # ------------------------------------------------------------------------
     # Try out different entropy coefficients
     # ------------------------------------------------------------------------
+    print("Task 1: Entropy coefficient changes")
+
     metrics_summary_filename = "metrics_summary_task1_ent_coefficient_variation"
 
     # SAC
     ent_coefficients = ["auto", 0.0, 0.005, 0.01, 0.05, 0.1]
     for ent in ent_coefficients:
-        model_env = ModelEvaluationEnv(algo_name="SAC", batch_size=64, learning_rate=current_lr, total_timesteps=timesteps, sac_ent_coef=ent)
+        model_env = ModelEvaluationEnv(algo_name="SAC", batch_size=256, learning_rate=1e-3, total_timesteps=timesteps, sac_ent_coef=ent)
         model_env.train()
         model_env.test(metrics_summary_filename)
 
@@ -761,7 +771,7 @@ def task1():
     # PPO
     ent_coefficients = [0.0, 0.005, 0.01, 0.05, 0.1]
     for ent in ent_coefficients:
-        model_env = ModelEvaluationEnv(algo_name="PPO", batch_size=64, learning_rate=current_lr, total_timesteps=timesteps, ppo_ent_coef=ent)
+        model_env = ModelEvaluationEnv(algo_name="PPO", batch_size=64, learning_rate=3e-4, total_timesteps=timesteps, ppo_ent_coef=ent)
         model_env.train()
         model_env.test(metrics_summary_filename)
 

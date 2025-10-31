@@ -202,6 +202,76 @@ In Figure \ref{fig:reward_vs_mae}, we compare the calculated MAE for each model 
 \newpage
 \section{Conclusion}
 
-This report compared four reinforcement learning algorithms: SAC, PPO, TD3, and DDPG. These algorithms were compared across multiple hyperparameter configurations in order to evaluate their performance in speed following. The metrics selected to analyze the different parameter confiugrations were MAE, RMSE and convergence rate. PPO and SAC consistently achieved lower error and smoother convergence, while TD3 and DDPG showed greater sensitivity to hyperparameters. On-policy methods, such as PPO and SAC, tolerated higher learning rates and smaller batch sizes, whereas off-policy methods, such as TD3 and DDPG, required more conservative parameters in order to achieve stable learning. Varying episode length revealed that PPO and SAC maintained stable performance across all episode lengths, unlike TD3 and DDPG, which exhibited greater variability. Finally, reward function exploration showed that smooth, convex rewards, such as absolute or squared, enhanced stability for stochastic methods, while the exponential reward function favored deterministic agents. Overall, PPO and SAC seemed to perform the best overall and in the most configurations.
+This report compared four reinforcement learning algorithms: SAC, PPO, TD3, and DDPG. These algorithms were compared across multiple hyperparameter configurations in order to evaluate their performance in speed following. The metrics selected to analyze the different parameter confiugrations were MAE, RMSE and convergence rate. PPO and SAC consistently achieved lower error and smoother convergence, while TD3 and DDPG showed greater sensitivity to hyperparameters. On-policy methods, such as PPO and SAC, tolerated higher learning rates and smaller batch sizes, whereas off-policy methods, such as TD3 and DDPG, required more conservative parameters in order to achieve stable learning. Varying episode length revealed that PPO and SAC maintained stable performance across all episode lengths, unlike TD3 and DDPG, which exhibited greater variability. Finally, reward function exploration showed that smooth, convex rewards, such as absolute or squared, enhanced stability for stochastic methods, while the exponential reward function favored deterministic agents. The results of all of these configurations can be found in Table \ref{tab:allvalues}. Overall, PPO and SAC seemed to perform the best overall and in the most configurations.
+
+
+\begin{table}[h!]
+\scriptsize
+\centering
+\caption{The calculated metrics for each model and all of its configurations.}
+\begin{tabular}{|lccccc|ccccc|}
+\hline
+\textbf{Algo} & \textbf{Episode} & \textbf{LR} & \textbf{Batch} & \textbf{EntCoef} & \textbf{Reward} & \textbf{MAE} & \textbf{MSE} & \textbf{RMSE} & \textbf{AvgReward} & \textbf{ConvRate} \\
+\hline
+SAC & 50  & 0.0003 & 256 & auto & abs & 2.1389 & 7.3130 & 2.7043 & -2.1389 & -0.00106 \\
+SAC & 100 & 0.0001 & 256 & auto & abs & 2.1972 & 7.6539 & 2.7666 & -2.1972 & -0.00236 \\
+SAC & 100 & 0.0003 & 64  & auto & abs & 2.1669 & 7.4093 & 2.7220 & -2.1669 & -0.00384 \\
+SAC & 100 & 0.0003 & 128 & auto & abs & 2.1300 & 7.2577 & 2.6940 & -2.1300 & -0.00039 \\
+SAC & 100 & 0.0003 & 256 & auto & abs & 2.0024 & 6.6034 & 2.5697 & -2.0024 &  0.00114 \\
+SAC & 100 & 0.0003 & 256 & auto & squared & 2.0334 & 6.4541 & 2.5405 & -6.4541 & 0.01098 \\
+SAC & 100 & 0.0003 & 256 & auto & exp & 2.8595 & 11.9614 & 3.4585 & -205.3485 & 2.98122 \\
+SAC & 100 & 0.0003 & 512 & auto & abs & 2.0429 & 6.5563 & 2.5605 & -2.0429 &  0.00149 \\
+SAC & 100 & 0.001  & 256 & 0.0  & abs & 2.4064 & 8.7507 & 2.9582 & -2.4064 &  0.01145 \\
+SAC & 100 & 0.001  & 256 & 0.005 & abs & 2.0951 & 6.8554 & 2.6183 & -2.0951 &  0.00178 \\
+SAC & 100 & 0.001  & 256 & 0.01  & abs & 2.0713 & 6.7789 & 2.6036 & -2.0713 & -0.00192 \\
+SAC & 100 & 0.001  & 256 & 0.05  & abs & 2.1015 & 6.9275 & 2.6320 & -2.1015 &  0.00028 \\
+SAC & 100 & 0.001  & 256 & 0.1   & abs & 2.0887 & 6.8657 & 2.6203 & -2.0887 & -0.00005 \\
+SAC & 200 & 0.0003 & 256 & auto & abs & 1.9750 & 6.1713 & 2.4842 & -1.9750 &  0.00236 \\
+SAC & 300 & 0.0003 & 256 & auto & abs & 2.2733 & 8.5784 & 2.9289 & -2.2733 &  0.00859 \\
+SAC & 400 & 0.0003 & 256 & auto & abs & 2.0941 & 6.8692 & 2.6209 & -2.0941 &  0.00446 \\
+PPO & 50  & 0.0003 & 256 & 0.0  & abs & 1.8022 & 5.1197 & 2.2627 & -1.8022 &  0.00313 \\
+PPO & 100 & 0.0001 & 64  & 0.0  & abs & 1.8168 & 5.1877 & 2.2776 & -1.8168 &  0.00300 \\
+PPO & 100 & 0.0003 & 64  & 0.0  & abs & 1.7820 & 4.9738 & 2.2302 & -1.7820 &  0.00233 \\
+PPO & 100 & 0.0003 & 64  & 0.005& abs & 1.7809 & 4.9722 & 2.2298 & -1.7809 &  0.00278 \\
+PPO & 100 & 0.0003 & 64  & 0.01 & abs & 2.2277 & 7.7526 & 2.7843 & -2.2277 &  0.00250 \\
+PPO & 100 & 0.0003 & 64  & 0.05 & abs & 1.9295 & 5.6995 & 2.3874 & -1.9295 &  0.00772 \\
+PPO & 100 & 0.0003 & 64  & 0.1  & abs & 1.9713 & 6.1430 & 2.4785 & -1.9713 &  0.00005 \\
+PPO & 100 & 0.0003 & 128 & 0.0  & abs & 1.7884 & 5.0149 & 2.2394 & -1.7884 &  0.00279 \\
+PPO & 100 & 0.0003 & 256 & 0.0  & abs & 1.7942 & 5.0771 & 2.2532 & -1.7942 &  0.00293 \\
+PPO & 100 & 0.0003 & 256 & 0.0  & squared & 1.8513 & 5.3592 & 2.3150 & -5.3592 & 0.00792 \\
+PPO & 100 & 0.0003 & 256 & 0.0  & exp & 7.3106 & 71.7677 & 8.4716 & -8276.3821 & 205.3172 \\
+PPO & 100 & 0.0003 & 512 & 0.0  & abs & 1.8357 & 5.3356 & 2.3099 & -1.8357 &  0.00188 \\
+PPO & 100 & 0.001  & 64  & 0.0  & abs & 1.8092 & 5.0678 & 2.2512 & -1.8092 &  0.00417 \\
+PPO & 200 & 0.0003 & 256 & 0.0  & abs & 1.7981 & 5.0876 & 2.2556 & -1.7981 &  0.00385 \\
+PPO & 300 & 0.0003 & 256 & 0.0  & abs & 1.8993 & 5.6727 & 2.3817 & -1.8993 &  0.00505 \\
+PPO & 400 & 0.0003 & 256 & 0.0  & abs & 1.7663 & 4.9330 & 2.2210 & -1.7663 &  0.00293 \\
+TD3 & 50  & 0.0003 & 256 & --   & abs & 1.9593 & 6.0739 & 2.4645 & -1.9593 &  0.00236 \\
+TD3 & 100 & 0.0001 & 128 & --   & abs & 2.3468 & 8.7055 & 2.9505 & -2.3468 & -0.00531 \\
+TD3 & 100 & 0.0001 & 256 & --   & abs & 2.0104 & 6.4646 & 2.5426 & -2.0104 &  0.00023 \\
+TD3 & 100 & 0.0003 & 64  & --   & abs & 3.4465 & 17.2291 & 4.1508 & -3.4465 &  0.02752 \\
+TD3 & 100 & 0.0003 & 128 & --   & abs & 1.9776 & 6.2656 & 2.5031 & -1.9776 & -0.00151 \\
+TD3 & 100 & 0.0003 & 256 & --   & abs & 3.7347 & 20.1441 & 4.4882 & -3.7347 &  0.02904 \\
+TD3 & 100 & 0.0003 & 256 & --   & squared & 10.0758 & 117.4554 & 10.8377 & -117.4554 & 1.26581 \\
+TD3 & 100 & 0.0003 & 256 & --   & exp & 2.0131 & 6.2277 & 2.4955 & -37.9669 & 0.13793 \\
+TD3 & 100 & 0.0003 & 512 & --   & abs & 2.1184 & 6.9741 & 2.6409 & -2.1184 & -0.00116 \\
+TD3 & 100 & 0.001  & 256 & --   & abs & 4.0393 & 23.4167 & 4.8391 & -4.0393 &  0.03577 \\
+TD3 & 200 & 0.0003 & 256 & --   & abs & 3.4396 & 17.1318 & 4.1391 & -3.4396 &  0.02645 \\
+TD3 & 300 & 0.0003 & 256 & --   & abs & 2.1052 & 7.0557 & 2.6562 & -2.1052 &  0.00500 \\
+TD3 & 400 & 0.0003 & 256 & --   & abs & 1.8633 & 5.6063 & 2.3678 & -1.8633 &  0.00218 \\
+DDPG & 50  & 0.0003 & 256 & --   & abs & 1.9910 & 6.3544 & 2.5208 & -1.9910 & -0.00303 \\
+DDPG & 100 & 0.0001 & 64  & --   & abs & 1.9684 & 6.0649 & 2.4627 & -1.9684 & -0.00103 \\
+DDPG & 100 & 0.0001 & 256 & --   & abs & 2.4399 & 9.2070 & 3.0343 & -2.4399 &  0.01510 \\
+DDPG & 100 & 0.0003 & 64  & --   & abs & 2.0697 & 6.6724 & 2.5831 & -2.0697 &  0.00552 \\
+DDPG & 100 & 0.0003 & 128 & --   & abs & 3.9719 & 22.1370 & 4.7050 & -3.9719 &  0.02876 \\
+DDPG & 100 & 0.0003 & 256 & --   & squared & 2.7376 & 11.4166 & 3.3788 & -11.4166 & 0.03244 \\
+DDPG & 100 & 0.0003 & 256 & --   & exp & 2.5308 & 9.6121 & 3.1003 & -105.1876 & 0.43810 \\
+DDPG & 100 & 0.001  & 256 & --   & abs & 2.8113 & 12.2187 & 3.4955 & -2.8113 &  0.02584 \\
+DDPG & 200 & 0.0003 & 256 & --   & abs & 2.0471 & 6.7365 & 2.5955 & -2.0471 &  0.00777 \\
+DDPG & 300 & 0.0003 & 256 & --   & abs & 3.1649 & 14.5464 & 3.8140 & -3.1649 &  0.01410 \\
+DDPG & 400 & 0.0003 & 256 & --   & abs & 5.4784 & 40.4669 & 6.3614 & -5.4784 &  0.05408 \\
+\hline
+\end{tabular}
+\label{tab:allvalues}
+\end{table}
 
 \end{document}
