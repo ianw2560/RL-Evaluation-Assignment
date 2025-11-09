@@ -23,7 +23,7 @@ import csv
 # ------------------------------------------------------------------------
 DATA_LEN = 1200
 CSV_FILE = "speed_profile.csv"
-
+ 
 # Force-generate a 1200-step sinusoidal + noise speed profile
 speeds = 10 + 5 * np.sin(0.02 * np.arange(DATA_LEN)) + 2 * np.random.randn(DATA_LEN)
 df_fake = pd.DataFrame({"speed": speeds})
@@ -370,7 +370,8 @@ class TrainEnv(gym.Env):
         elif self.reward_type == "squared":
             return -(error ** 2)
         elif self.reward_type == "exp":
-            return -np.exp(min(abs(error), 10)) 
+            return -np.exp(min(abs(error), 10))
+        elif self.reward_type == "lead_vehicle"
         else:
             raise ValueError(f"Unknown reward_type: {self.reward_type}")
 
@@ -687,7 +688,7 @@ def task1():
     print("Task 1: Batch size changes")
 
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
-    batch_sizes = [64, 128, 256, 512]
+    batch_sizes = [64, 128, 256]
     metrics_summary_filename = "metrics_summary_task1_batchsize_variation"
 
     for algo in algorithms:
@@ -750,35 +751,6 @@ def task1():
     model_env.train()
     model_env.test(metrics_summary_filename)
 
-    # ------------------------------------------------------------------------
-    # Try out different entropy coefficients
-    # ------------------------------------------------------------------------
-    print("Task 1: Entropy coefficient changes")
-
-    metrics_summary_filename = "metrics_summary_task1_ent_coefficient_variation"
-
-    # SAC
-    ent_coefficients = ["auto", 0.0, 0.005, 0.01, 0.05, 0.1]
-    for ent in ent_coefficients:
-        model_env = ModelEvaluationEnv(algo_name="SAC", batch_size=256, learning_rate=1e-3, total_timesteps=timesteps, sac_ent_coef=ent)
-        model_env.train()
-        model_env.test(metrics_summary_filename)
-
-    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="SAC", metric="MAE", out_name="task1_SAC_entropy_vs_MAE", save_dir="task1_images")
-    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="SAC", metric="RMSE", out_name="task1_SAC_entropy_vs_RMSE", save_dir="task1_images")
-    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="SAC", metric="ConvergenceRate", out_name="task1_SAC_entropy_vs_ConvergenceRate", save_dir="task1_images")
-
-    # PPO
-    ent_coefficients = [0.0, 0.005, 0.01, 0.05, 0.1]
-    for ent in ent_coefficients:
-        model_env = ModelEvaluationEnv(algo_name="PPO", batch_size=64, learning_rate=3e-4, total_timesteps=timesteps, ppo_ent_coef=ent)
-        model_env.train()
-        model_env.test(metrics_summary_filename)
-
-    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="PPO", metric="MAE", out_name="task1_PPO_entropy_vs_MAE", save_dir="task1_images")
-    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="PPO", metric="RMSE", out_name="task1_PPO_entropy_vs_RMSE", save_dir="task1_images")
-    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="PPO", metric="ConvergenceRate", out_name="task1_PPO_entropy_vs_ConvergenceRate", save_dir="task1_images")
-
 def task2():
     print("Task 2: Episode Length Variation")
 
@@ -788,7 +760,7 @@ def task2():
     # Try out different episode lengths
     # ------------------------------------------------------------------------
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
-    episode_lengths = [50, 100, 200, 300, 400]
+    episode_lengths = [100, 200, 300]
     metrics_summary_filename = "metrics_summary_task2_episodelength_variation"
 
     for algo in algorithms:
@@ -835,33 +807,11 @@ def run_from_command_line(algo_name, batch_size, episode_len, learning_rate, rew
                                    )
 
     # ------------------------------------------------------------------------
-    # Train model based on given parameters
+    # Train and test model
     # ------------------------------------------------------------------------
+    metrics_filename = "cli_metrics"
     model_env.train()
-    model = model_env.model
-
-    # ------------------------------------------------------------------------
-    # 5E) Test the model on the FULL 1200-step dataset in one go
-    # ------------------------------------------------------------------------
-    test_env = TestEnv(full_speed_data, delta_t=1.0)
-
-    obs, _ = test_env.reset()
-    predicted_speeds = []
-    reference_speeds = []
-    rewards = []
-
-    for _ in range(DATA_LEN):
-        action, _states = model.predict(obs, deterministic=True)
-        obs, reward, terminated, truncated, info = test_env.step(action)
-        predicted_speeds.append(obs[0])  # current_speed
-        reference_speeds.append(obs[1])  # reference_speed
-        rewards.append(reward)
-        if terminated or truncated:
-            break
-
-    avg_test_reward = np.mean(rewards)
-    print(f"[TEST] Average reward over 1200-step test: {avg_test_reward:.3f}")
-    model_env.compute_metrics(reference_speeds=reference_speeds, predicted_speeds=predicted_speeds, rewards=rewards)
+    model_env.test(metrics_filename)
 
 # ------------------------------------------------------------------------
 # 5) Main: user sets episode_len from command line, train, then test
@@ -933,6 +883,7 @@ def main():
     algo_name = args.algorithm
     batch_size = args.batch_size
     episode_len = args.episode_len
+    reward_type = args.reward_type
     
     learning_rate = args.learning_rate
     total_timesteps = args.timesteps
