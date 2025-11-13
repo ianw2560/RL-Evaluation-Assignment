@@ -18,8 +18,44 @@ import time
 import argparse
 import csv
 
+# Import functions for plotting data
+from plot_data import *
+
 # ------------------------------------------------------------------------
-# 1) Always create a 1200-step speed dataset
+# Create a lead vehicle that drives for 1200-steps
+# ------------------------------------------------------------------------
+SAFE_MIN_DIST = 5.0
+SAFE_MAX_DIST = 30.0
+
+ACCEL_MIN = -2.0  # m/s^2
+ACCEL_MAX =  2.0  # m/s^2
+MAX_JERK   =  1.0  # m/s^3  (|a_t - a_{t-1}| <= MAX_JERK * DT)
+
+# Reward weights
+W_DIST = 2.0     # distance-band penalty
+W_SPEED = 1.0    # speed-matching penalty
+W_JERK = 0.2     # comfort penalty
+W_ACC_SOFT = 0.05  # soft push if hugging accel limits
+
+def create_lead_vechicle(num_steps, csv_file="lead_vehicle_profile.csv"):
+
+    speed = 10 + 5 * np.sin(0.02 * np.arange(num_steps)) + 2 * np.random.randn(num_steps)
+
+
+    position = np.zeros(num_steps)
+    for i in range(1, num_steps):
+        position[i] = position[i-1] + speed[i-1]
+
+    # df = pd.DataFrame({"speed": speed, "position": position})
+    # df.to_csv(csv_file, index=False)
+    # print(f"Created {csv_file} with {num_steps} steps.")
+
+
+
+    return speed, position
+
+# ------------------------------------------------------------------------
+# Always create a 1200-step speed dataset
 # ------------------------------------------------------------------------
 DATA_LEN = 1200
 CSV_FILE = "speed_profile.csv"
@@ -33,6 +69,13 @@ print(f"Created {CSV_FILE} with {DATA_LEN} steps.")
 df = pd.read_csv(CSV_FILE)
 full_speed_data = df["speed"].values
 assert len(full_speed_data) == DATA_LEN, "Dataset must be 1200 steps after generation."
+
+# ------------------------------------------------------------------------
+# Create a 1200-step lead vehicle speed and position dataset
+# ------------------------------------------------------------------------
+
+
+lead_speed, lead_position = create_lead_vechicle(1200)
 
 # ------------------------------------------------------------------------
 # 2) Utility: chunk the dataset, possibly with leftover
@@ -49,6 +92,7 @@ def chunk_into_episodes(data, chunk_size):
         chunk = data[start:end]
         episodes.append(chunk)
         start = end
+
     return episodes
 
 def select_algo(algo_name, train_env, device, learning_rate=3e-4, batch_size=256, sac_ent_coef="auto", ppo_ent_coef=0.0):
@@ -162,302 +206,224 @@ def plot_learningrate_vs_metric(csv_path, out_name, metric="MAE", save_dir="imag
 
     print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
 
-
-def plot_batchsize_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(7, 4)):
-
-    df = pd.read_csv(csv_path)
-    os.makedirs(save_dir, exist_ok=True)
-
-    algos = df["Algorithm"].unique()
-    colors = plt.cm.tab10.colors
-
-    plt.figure(figsize=figsize)
-    for i, algo in enumerate(algos):
-        sub = df[df["Algorithm"] == algo].copy()
-        sub = sub.groupby("BatchSize", as_index=False)[metric].mean().sort_values("BatchSize")
-        plt.plot(
-            sub["BatchSize"], sub[metric],
-            marker="o", linestyle="-", label=algo, color=colors[i % len(colors)]
-        )
-
-    # Set xticks explicitly to tested batch sizes
-    batch_values = sorted(df["BatchSize"].unique())
-    plt.xticks(batch_values, [str(int(v)) for v in batch_values])
-
-    plt.title(f"{metric} vs Batch Size")
-    plt.xlabel("Batch Size")
-    plt.ylabel(metric)
-    plt.grid(alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, f"{out_name}.png"), dpi=300)
-    plt.close()
-
-    print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
-
-def plot_episodelength_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(7, 4)):
-
-    df = pd.read_csv(csv_path)
-    os.makedirs(save_dir, exist_ok=True)
-
-    algos = df["Algorithm"].unique()
-    colors = plt.cm.tab10.colors
-
-    plt.figure(figsize=figsize)
-    for i, algo in enumerate(algos):
-        sub = df[df["Algorithm"] == algo].copy()
-        sub = sub.groupby("EpisodeLength", as_index=False)[metric].mean().sort_values("EpisodeLength")
-        plt.plot(
-            sub["EpisodeLength"], sub[metric],
-            marker="o", linestyle="-", label=algo, color=colors[i % len(colors)]
-        )
-
-    # Set xticks explicitly to tested batch sizes
-    batch_values = sorted(df["EpisodeLength"].unique())
-    plt.xticks(batch_values, [str(int(v)) for v in batch_values])
-
-    plt.title(f"{metric} vs Episode Length")
-    plt.xlabel("Episode Length")
-    plt.ylabel(metric)
-    plt.grid(alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, f"{out_name}.png"), dpi=300)
-    plt.close()
-
-    print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
-
-
-def plot_rewardtype_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(10, 8), clip_outliers=True, percentile_clip=95, annotate=True):
-
-    df = pd.read_csv(csv_path)
-    os.makedirs(save_dir, exist_ok=True)
-
-    if "RewardType" not in df.columns:
-        raise ValueError("CSV file must contain a 'RewardType' column.")
-
-    algos = sorted(df["Algorithm"].unique())
-    reward_types = sorted(df["RewardType"].unique())
-    colors = plt.cm.tab10.colors
-
-    grouped = df.groupby(["RewardType", "Algorithm"], as_index=False)[metric].mean()
-
-    # Clip outliers globally (helps if one extreme value causes blowout)
-    if clip_outliers:
-        clip_val = np.percentile(grouped[metric], percentile_clip)
-        grouped[metric] = np.clip(grouped[metric], None, clip_val)
-        print(f"[INFO] Clipped values above {clip_val:.2f} for {metric}")
-
-    # Create subplot grid (2x2)
-    n_subplots = len(reward_types)
-    n_rows, n_cols = 2, 2
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
-    axes = axes.flatten()
-
-    for idx, reward in enumerate(reward_types):
-        ax = axes[idx]
-        sub = grouped[grouped["RewardType"] == reward]
-
-        x = np.arange(len(algos))
-        bar_width = 0.6
-
-        bars = ax.bar(
-            x,
-            sub[metric],
-            color=[colors[i % len(colors)] for i in range(len(algos))],
-            alpha=0.9,
-            width=bar_width,
-        )
-
-        # Annotate values
-        if annotate:
-            for bar, val in zip(bars, sub[metric]):
-                if val > 0:
-                    ax.text(
-                        bar.get_x() + bar.get_width() / 2,
-                        val + 0.02 * max(sub[metric]),
-                        f"{val:.2f}",
-                        ha="center",
-                        va="bottom",
-                        fontsize=8
-                    )
-
-        # Local scaling per subplot
-        local_max = max(sub[metric])
-        ax.set_ylim(0, local_max * 1.15)
-
-        ax.set_title(f"{reward} Reward", fontsize=11)
-        ax.set_xticks(x)
-        ax.set_xticklabels(algos, rotation=45, fontsize=9)
-        ax.set_ylabel(metric)
-        ax.grid(axis="y", linestyle="--", alpha=0.3)
-
-    # Remove empty subplots (if < 4 reward types)
-    for j in range(len(reward_types), len(axes)):
-        fig.delaxes(axes[j])
-
-    # Overall title
-    fig.suptitle(f"{metric} Comparison Across Reward Functions", fontsize=14, y=0.98)
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
-
-    # Save combined figure
-    out_path = os.path.join(save_dir, f"{out_name}.png")
-    plt.savefig(out_path, dpi=300)
-    plt.close()
-
-    print(f"[INFO] Saved multi-subplot comparison to {out_path}")
-
-def plot_entropy_vs_metric(csv_path, out_name, algo, metric="MAE", save_dir="images", figsize=(7, 4)):
-
-    df = pd.read_csv(csv_path)
-    os.makedirs(save_dir, exist_ok=True)
-
-    # Filter by algorithm
-    sub = df[df["Algorithm"] == algo].copy()
-
-    # Handle missing or mixed types in EntCoef column
-    sub["EntCoef"] = sub["EntCoef"].astype(str)
-    sub = sub.groupby("EntCoef", as_index=False)[metric].mean().sort_values("EntCoef")
-
-    # Plot
-    plt.figure(figsize=figsize)
-    bars = plt.bar(sub["EntCoef"], sub[metric], alpha=0.75, label=algo, color="C0")
-
-    # Add horizontal text labels above bars
-    for bar in bars:
-        height = bar.get_height()
-        plt.text(
-            bar.get_x() + bar.get_width() / 2,
-            height * 1.01,  # a bit above the bar
-            f"{height:.3f}",
-            ha="center", va="bottom", fontsize=9, rotation=0
-        )
-
-    plt.title(f"{algo}: {metric} vs Entropy Coefficient")
-    plt.xlabel("Entropy Coefficient")
-    plt.ylabel(metric)
-    plt.grid(alpha=0.3, axis="y")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, f"{out_name}.png"), dpi=300)
-    plt.close()
-
-    print(f"[INFO] Saved plot to {save_dir}/{out_name}.png for metric '{metric}'")
-
 # ------------------------------------------------------------------------
 # 3A) Training Environment: picks a random chunk each reset
 # ------------------------------------------------------------------------
 class TrainEnv(gym.Env):
-    def __init__(self, episodes_list, delta_t=1.0, reward_type="abs"):
+    def __init__(self, episodes_list, delta_t=1.0, reward_type="lead_vehicle"):
         super().__init__()
         self.episodes_list = episodes_list
         self.num_episodes = len(episodes_list)
         self.delta_t = delta_t
         self.reward_type = reward_type
 
-        self.action_space = spaces.Box(low=-3.0, high=3.0, shape=(1,), dtype=np.float32)
-        self.observation_space = spaces.Box(low=0.0, high=50.0, shape=(2,), dtype=np.float32)
+        # Action: desired acceleration with physical limits
+        self.action_space = spaces.Box(low=ACCEL_MIN, high=ACCEL_MAX, shape=(1,), dtype=np.float32)
+        # Observation: [ego_speed, lead_speed, rel_distance]
+        self.observation_space = spaces.Box(low=np.array([0.0, 0.0, 0.0], dtype=np.float32),
+                                            high=np.array([50.0, 50.0, 200.0], dtype=np.float32),
+                                            dtype=np.float32)
 
+        # Keep existing member names; add a few for ACC
         self.current_episode = None
         self.episode_len = 0
         self.step_idx = 0
-        self.current_speed = 0.0
-        self.ref_speed = 0.0
+        self.current_speed = 0.0      # ego speed
+        self.ref_speed = 0.0          # here we use this slot to also store lead speed for backwards-compat
+        self.ego_pos = 0.0
+        self.last_accel = 0.0
 
-    def compute_reward(self, error):
-        if self.reward_type == "abs":
-            return -abs(error)
-        elif self.reward_type == "squared":
-            return -(error ** 2)
-        elif self.reward_type == "exp":
-            return -np.exp(min(abs(error), 10))
-        elif self.reward_type == "lead_vehicle"
-        else:
+        self.lead_speed = None
+        self.lead_pos = None
+
+    # New, simplified reward: ACC distance band + speed match + jerk + soft accel limit
+    def compute_reward(self, rel_d, dv, jerk, accel):
+        if self.reward_type != "lead_vehicle":
             raise ValueError(f"Unknown reward_type: {self.reward_type}")
+
+        # Distance band penalty (quadratic outside [SAFE_MIN_DIST, SAFE_MAX_DIST])
+        if rel_d < SAFE_MIN_DIST:
+            dist_pen = (SAFE_MIN_DIST - rel_d) ** 2
+        elif rel_d > SAFE_MAX_DIST:
+            dist_pen = (rel_d - SAFE_MAX_DIST) ** 2
+        else:
+            dist_pen = 0.0
+
+        speed_pen = dv * dv                       # (ego - lead)^2
+        jerk_pen = jerk * jerk                    # comfort
+        acc_soft_pen = max(0.0, abs(accel) - 0.8 * ACCEL_MAX) ** 2  # discourage banging limits
+
+        reward = -(W_DIST * dist_pen + W_SPEED * speed_pen + W_JERK * jerk_pen + W_ACC_SOFT * acc_soft_pen)
+
+        return reward
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         ep_idx = np.random.randint(0, self.num_episodes)
         self.current_episode = self.episodes_list[ep_idx]
         self.episode_len = len(self.current_episode)
+
         self.step_idx = 0
         self.current_speed = 0.0
-        self.ref_speed = self.current_episode[self.step_idx]
+        self.ego_pos = 0.0
+        self.last_accel = 0.0
 
-        obs = np.array([self.current_speed, self.ref_speed], dtype=np.float32)
+        # Fresh lead profile per episode (promotes generalization)
+        self.lead_speed, self.lead_pos = create_lead_vechicle(self.episode_len)
+
+        # Build initial obs
+        rel_d0 = max(self.lead_pos[0] - self.ego_pos, 0.0)
+        self.ref_speed = self.lead_speed[0]  # use ref_speed field to carry lead_speed (preserves name)
+        obs = np.array([self.current_speed, self.ref_speed, rel_d0], dtype=np.float32)
         info = {}
+
         return obs, info
 
     def step(self, action):
-        accel = np.clip(action[0], -3.0, 3.0)
-        self.current_speed += accel * self.delta_t
-        self.current_speed = max(self.current_speed, 0.0)
+        # Desired accel with clip and jerk rate-limit
+        a_des = float(np.clip(action[0], ACCEL_MIN, ACCEL_MAX))
+        a_delta_max = MAX_JERK * self.delta_t
+        a = float(np.clip(a_des, self.last_accel - a_delta_max, self.last_accel + a_delta_max))
+        a = float(np.clip(a, ACCEL_MIN, ACCEL_MAX))
+        jerk = (a - self.last_accel) / self.delta_t
+        self.last_accel = a
 
-        self.ref_speed = self.current_episode[self.step_idx]
-        error = abs(self.current_speed - self.ref_speed)
-        reward = self.compute_reward(error)
+        # Integrate ego
+        self.current_speed = max(self.current_speed + a * self.delta_t, 0.0)
+        self.ego_pos += self.current_speed * self.delta_t
 
-        self.step_idx += 1
-        terminated = (self.step_idx >= self.episode_len)
+        # Current signals at time step_idx
+        lead_v = self.lead_speed[self.step_idx]
+        rel_d = max(self.lead_pos[self.step_idx] - self.ego_pos, 0.0)
+        dv = self.current_speed - lead_v
+
+        reward = self.compute_reward(rel_d, dv, jerk, a)
+
+        # Prepare next index and obs (avoid off-by-one)
+        next_idx = self.step_idx + 1
+        terminated = (next_idx >= self.episode_len)
+        idx_for_obs = self.episode_len - 1 if terminated else next_idx
+
+        # Next obs
+        next_lead_v = self.lead_speed[idx_for_obs]
+        next_rel_d = max(self.lead_pos[idx_for_obs] - self.ego_pos, 0.0)
+        self.ref_speed = next_lead_v
+        obs = np.array([self.current_speed, self.ref_speed, next_rel_d], dtype=np.float32)
+
+        self.step_idx = next_idx
         truncated = False
 
-        obs = np.array([self.current_speed, self.ref_speed], dtype=np.float32)
-        info = {"speed_error": error, "reward_type": self.reward_type}
-        return obs, reward, terminated, truncated, info
+        info = {
+            "speed_error": abs(dv),
+            "reward_type": self.reward_type,
+            "rel_distance": rel_d,
+            "speed_diff": dv,
+            "jerk": jerk
+        }
 
+        return obs, reward, terminated, truncated, info
 
 # ------------------------------------------------------------------------
 # 3B) Test Environment with same reward flexibility
 # ------------------------------------------------------------------------
 class TestEnv(gym.Env):
-    def __init__(self, full_data, delta_t=1.0, reward_type="abs"):
+    def __init__(self, full_data, delta_t=1.0, reward_type="lead_vehicle"):
         super().__init__()
         self.full_data = full_data
         self.n_steps = len(full_data)
         self.delta_t = delta_t
         self.reward_type = reward_type
 
-        self.action_space = spaces.Box(low=-3.0, high=3.0, shape=(1,), dtype=np.float32)
-        self.observation_space = spaces.Box(low=0.0, high=50.0, shape=(2,), dtype=np.float32)
+        self.action_space = spaces.Box(low=ACCEL_MIN, high=ACCEL_MAX, shape=(1,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=np.array([0.0, 0.0, 0.0], dtype=np.float32),
+                                            high=np.array([50.0, 50.0, 200.0], dtype=np.float32),
+                                            dtype=np.float32)
 
         self.idx = 0
         self.current_speed = 0.0
+        self.ego_pos = 0.0
+        self.last_accel = 0.0
 
-    def compute_reward(self, error):
-        if self.reward_type == "abs":
-            return -abs(error)
-        elif self.reward_type == "squared":
-            return -(error ** 2)
-        elif self.reward_type == "exp":
-            return -np.exp(min(abs(error), 10))
-        else:
+        # Deterministic lead (fixed seed) for reproducible evaluation
+        rng = np.random.RandomState(42)
+        t = np.arange(self.n_steps)
+        noise = rng.normal(0, 0.5, size=self.n_steps)
+        self.lead_speed = np.clip(12.0 + 4.0 * np.sin(0.02 * t) + noise, 0.0, None)
+        self.lead_pos = np.zeros(self.n_steps)
+        for i in range(1, self.n_steps):
+            self.lead_pos[i] = self.lead_pos[i-1] + self.lead_speed[i-1] * self.delta_t
+
+    # Same simplified ACC reward as TrainEnv
+    def compute_reward(self, rel_d, dv, jerk, accel):
+        if self.reward_type != "lead_vehicle":
             raise ValueError(f"Unknown reward_type: {self.reward_type}")
+
+        if rel_d < SAFE_MIN_DIST:
+            dist_pen = (SAFE_MIN_DIST - rel_d) ** 2
+        elif rel_d > SAFE_MAX_DIST:
+            dist_pen = (rel_d - SAFE_MAX_DIST) ** 2
+        else:
+            dist_pen = 0.0
+
+        speed_pen = dv * dv
+        jerk_pen = jerk * jerk
+        acc_soft_pen = max(0.0, abs(accel) - 0.8 * ACCEL_MAX) ** 2
+
+        reward = -(W_DIST * dist_pen + W_SPEED * speed_pen + W_JERK * jerk_pen + W_ACC_SOFT * acc_soft_pen)
+        return reward
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.idx = 0
         self.current_speed = 0.0
-        ref_speed = self.full_data[self.idx]
-        obs = np.array([self.current_speed, ref_speed], dtype=np.float32)
+        self.ego_pos = 0.0
+        self.last_accel = 0.0
+
+        rel_d0 = max(self.lead_pos[0] - self.ego_pos, 0.0)
+        ref_speed = self.lead_speed[0]     # keep your variable name; it's lead speed here
+        obs = np.array([self.current_speed, ref_speed, rel_d0], dtype=np.float32)
         info = {}
         return obs, info
 
     def step(self, action):
-        accel = np.clip(action[0], -3.0, 3.0)
-        self.current_speed += accel * self.delta_t
-        self.current_speed = max(self.current_speed, 0.0)
+        a_des = float(np.clip(action[0], ACCEL_MIN, ACCEL_MAX))
+        a_delta_max = MAX_JERK * self.delta_t
+        a = float(np.clip(a_des, self.last_accel - a_delta_max, self.last_accel + a_delta_max))
+        a = float(np.clip(a, ACCEL_MIN, ACCEL_MAX))
+        jerk = (a - self.last_accel) / self.delta_t
+        self.last_accel = a
 
-        ref_speed = self.full_data[self.idx]
-        error = abs(self.current_speed - ref_speed)
-        reward = self.compute_reward(error)
+        # Integrate ego
+        self.current_speed = max(self.current_speed + a * self.delta_t, 0.0)
+        self.ego_pos += self.current_speed * self.delta_t
 
-        self.idx += 1
-        terminated = (self.idx >= self.n_steps)
+        lead_v = self.lead_speed[self.idx]
+        rel_d = max(self.lead_pos[self.idx] - self.ego_pos, 0.0)
+        dv = self.current_speed - lead_v
+
+        reward = self.compute_reward(rel_d, dv, jerk, a)
+
+        next_idx = self.idx + 1
+        terminated = (next_idx >= self.n_steps)
+        idx_for_obs = self.n_steps - 1 if terminated else next_idx
+
+        ref_speed_next = self.lead_speed[idx_for_obs]
+        next_rel_d = max(self.lead_pos[idx_for_obs] - self.ego_pos, 0.0)
+        obs = np.array([self.current_speed, ref_speed_next, next_rel_d], dtype=np.float32)
+
+        self.idx = next_idx
         truncated = False
 
-        obs = np.array([self.current_speed, ref_speed], dtype=np.float32)
-        info = {"speed_error": error, "reward_type": self.reward_type}
+        info = {
+            "speed_error": abs(dv),
+            "reward_type": self.reward_type,
+            "rel_distance": rel_d,
+            "speed_diff": dv,
+            "jerk": jerk
+        }
+
         return obs, reward, terminated, truncated, info
+
 
 # ------------------------------------------------------------------------
 # 4) CustomLoggingCallback (optional)
@@ -678,7 +644,6 @@ class ModelEvaluationEnv():
 # ------------------------------------------------------------------------
 def task1():
     print("Task 1: Model and Hyperparameter Modifications")
-    
 
     timesteps = 100_000
 
@@ -869,9 +834,9 @@ def main():
     parser.add_argument(
         "--reward_type",
         type=str,
-        default="abs",
+        default="lead_vehicle",
         choices=["abs", "squared", "exp"],
-        help="Select the reward function type (abs, squared, exp)."
+        help="Select the reward function type"
     )
     args = parser.parse_args()
 
