@@ -6,3 +6,4 @@
 *.fls
 logs_chunk_training/
 trained_models/
+__pycache__/
