@@ -372,8 +372,8 @@ def plot_speed_difference(csv_path, out_name, algo=None, save_dir="images", band
     out_path = os.path.join(save_dir, f"speed_difference_{out_name}.png")
     plt.savefig(out_path, dpi=300)
     plt.close()
-    
+
     print(f"[INFO] Saved speed difference plot: {out_path}")
 
-    if pct_in_band is not None:
-        print(f", % within ±{band:g} m/s = {pct_in_band:.1f}%")
+    # if pct_in_band is not None:
+    #     print(f", % within ±{band:g} m/s = {pct_in_band:.1f}%")

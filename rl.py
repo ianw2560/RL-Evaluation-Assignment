@@ -505,16 +505,16 @@ class ModelEvaluationEnv():
 
         self.model = None
 
-    def compute_metrics(self, reference_speeds, predicted_speeds, rewards, avg_reward, filename):
+    def compute_metrics(self, lead_speeds, ego_speeds, ego_jerks, rewards, avg_reward, filename):
         """
         Compute performance metrics after testing.
         """
 
-        ref = np.array(reference_speeds)
-        pred = np.array(predicted_speeds)
+        lead = np.array(lead_speeds)
+        ego = np.array(ego_speeds)
 
-        mae = mean_absolute_error(ref, pred)
-        mse = mean_squared_error(ref, pred)
+        mae = mean_absolute_error(lead, ego)
+        mse = mean_squared_error(lead, ego)
         rmse = np.sqrt(mse)
 
         # Convergence rate (very rough): average reward improvement per 1k steps
@@ -522,10 +522,14 @@ class ModelEvaluationEnv():
         convergence_rate = np.mean(rewards[-100:]) - np.mean(rewards[:100])
         convergence_rate /= self.total_timesteps / 1000  # normalize per 1k steps
 
-        print(f"[METRICS] MAE={mae:.4f}, MSE={mse:.4f}, RMSE={rmse:.4f}, AvgReward={avg_reward:.4f}, ConvergenceRate={convergence_rate:.6f}")
+        # Calculate mean and variance of jerk        
+        avg_jerk = np.mean(np.abs(ego_jerks))
+        var_jerk = np.var(ego_jerks)
+
+        print(f"[METRICS] MAE={mae:.4f}, MSE={mse:.4f}, RMSE={rmse:.4f}, AvgReward={avg_reward:.4f}, ConvergenceRate={convergence_rate:.6f}, AvgJerk={avg_jerk:.4f}, VarianceJerk={var_jerk:.4f}")
 
         # Append results to CSV
-        fieldnames = ["Algorithm", "EpisodeLength", "LearningRate", "BatchSize", "EntCoef", "RewardType", "MAE", "MSE", "RMSE", "AvgReward", "ConvergenceRate"]
+        fieldnames = ["Algorithm", "EpisodeLength", "LearningRate", "BatchSize", "EntCoef", "RewardType", "MAE", "MSE", "RMSE", "AvgReward", "ConvergenceRate", "AvgJerk", "VarianceJerk"]
         new_row = {
             "Algorithm": self.algo_name,
             "EpisodeLength": self.episode_len,
@@ -537,7 +541,9 @@ class ModelEvaluationEnv():
             "MSE": mse,
             "RMSE": rmse,
             "AvgReward": avg_reward,
-            "ConvergenceRate": convergence_rate
+            "ConvergenceRate": convergence_rate,
+            "AvgJerk": avg_jerk, 
+            "VarianceJerk": var_jerk,
         }
 
         metrics_csv = f"metrics/{filename}.csv"
@@ -552,8 +558,8 @@ class ModelEvaluationEnv():
 
         # Plot the entire test
         plt.figure(figsize=(10, 5))
-        plt.plot(reference_speeds, label="Reference Speed", linestyle="--")
-        plt.plot(predicted_speeds, label="Predicted Speed", linestyle="-")
+        plt.plot(lead_speeds, label="Lead Speed", linestyle="--")
+        plt.plot(ego_speeds, label="Ego Speed", linestyle="-")
         plt.xlabel("Timestep")
         plt.ylabel("Speed (m/s)")
         plt.title(f"Test on full 1200-step dataset (episode_len={self.episode_len})")
@@ -665,8 +671,9 @@ class ModelEvaluationEnv():
 
         # Calculate metrics
         self.compute_metrics(
-            reference_speeds=lead_speeds,
-            predicted_speeds=ego_speeds,
+            lead_speeds=lead_speeds,
+            ego_speeds=ego_speeds,
+            ego_jerks=jerks,
             rewards=rewards,
             avg_reward=avg_test_reward,
             filename=metrics_summary_filename,
@@ -689,8 +696,6 @@ class ModelEvaluationEnv():
             "reward": rewards[:len(ego_speeds)],
         }).to_csv(data_csv, index=False)
         print(f"[INFO] Wrote timeseries to {data_csv}")
-
-
 
         plot_lead_vs_ego(data_csv, out_name=f"{out_name}", algo=self.algo_name)
         plot_position_difference(data_csv, out_name=f"{out_name}", algo=self.algo_name)
