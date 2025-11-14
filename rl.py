@@ -280,7 +280,6 @@ class TrainEnv(gym.Env):
         return obs, info
 
     def step(self, action):
-        # Desired accel with clip and jerk rate-limit
         a_des = float(np.clip(action[0], ACCEL_MIN, ACCEL_MAX))
         a_delta_max = MAX_JERK * self.delta_t
         a = float(np.clip(a_des, self.last_accel - a_delta_max, self.last_accel + a_delta_max))
@@ -292,34 +291,39 @@ class TrainEnv(gym.Env):
         self.current_speed = max(self.current_speed + a * self.delta_t, 0.0)
         self.ego_pos += self.current_speed * self.delta_t
 
-        # Current signals at time step_idx
-        lead_v = self.lead_speed[self.step_idx]
-        rel_d = max(self.lead_pos[self.step_idx] - self.ego_pos, 0.0)
-        dv = self.current_speed - lead_v
+        # --- use the current index for signals & logging ---
+        idx_cur = self.idx
+        lead_v = self.lead_speed[idx_cur]
+        rel_d  = max(self.lead_pos[idx_cur] - self.ego_pos, 0.0)
+        dv     = self.current_speed - lead_v
 
         reward = self.compute_reward(rel_d, dv, jerk, a)
 
-        # Prepare next index and obs (avoid off-by-one)
-        next_idx = self.step_idx + 1
-        terminated = (next_idx >= self.episode_len)
-        idx_for_obs = self.episode_len - 1 if terminated else next_idx
+        # Prepare next index and obs (avoid off-by-one by clamping)
+        next_idx = idx_cur + 1
+        terminated = (next_idx >= self.n_steps)
+        idx_for_obs = self.n_steps - 1 if terminated else next_idx
 
-        # Next obs
-        next_lead_v = self.lead_speed[idx_for_obs]
-        next_rel_d = max(self.lead_pos[idx_for_obs] - self.ego_pos, 0.0)
-        self.ref_speed = next_lead_v
-        obs = np.array([self.current_speed, self.ref_speed, next_rel_d], dtype=np.float32)
+        ref_speed_next = self.lead_speed[idx_for_obs]
+        next_rel_d     = max(self.lead_pos[idx_for_obs] - self.ego_pos, 0.0)
+        obs = np.array([self.current_speed, ref_speed_next, next_rel_d], dtype=np.float32)
 
-        self.step_idx = next_idx
-        truncated = False
-
+        # --- build info BEFORE advancing self.idx ---
         info = {
             "speed_error": abs(dv),
             "reward_type": self.reward_type,
             "rel_distance": rel_d,
             "speed_diff": dv,
-            "jerk": jerk
+            "jerk": jerk,
+            "lead_speed": lead_v,
+            "lead_pos": self.lead_pos[idx_cur],   # <- current index, safe
+            "ego_speed": self.current_speed,
+            "ego_pos": self.ego_pos,
         }
+
+        # advance index last
+        self.idx = next_idx
+        truncated = False
 
         return obs, reward, terminated, truncated, info
 
@@ -397,30 +401,39 @@ class TestEnv(gym.Env):
         self.current_speed = max(self.current_speed + a * self.delta_t, 0.0)
         self.ego_pos += self.current_speed * self.delta_t
 
-        lead_v = self.lead_speed[self.idx]
-        rel_d = max(self.lead_pos[self.idx] - self.ego_pos, 0.0)
-        dv = self.current_speed - lead_v
+        # --- use the current index for signals & logging ---
+        idx_cur = self.idx
+        lead_v = self.lead_speed[idx_cur]
+        rel_d  = max(self.lead_pos[idx_cur] - self.ego_pos, 0.0)
+        dv     = self.current_speed - lead_v
 
         reward = self.compute_reward(rel_d, dv, jerk, a)
 
-        next_idx = self.idx + 1
+        # Prepare next index and obs (avoid off-by-one by clamping)
+        next_idx = idx_cur + 1
         terminated = (next_idx >= self.n_steps)
         idx_for_obs = self.n_steps - 1 if terminated else next_idx
 
         ref_speed_next = self.lead_speed[idx_for_obs]
-        next_rel_d = max(self.lead_pos[idx_for_obs] - self.ego_pos, 0.0)
+        next_rel_d     = max(self.lead_pos[idx_for_obs] - self.ego_pos, 0.0)
         obs = np.array([self.current_speed, ref_speed_next, next_rel_d], dtype=np.float32)
 
-        self.idx = next_idx
-        truncated = False
-
+        # --- build info BEFORE advancing self.idx ---
         info = {
             "speed_error": abs(dv),
             "reward_type": self.reward_type,
             "rel_distance": rel_d,
             "speed_diff": dv,
-            "jerk": jerk
+            "jerk": jerk,
+            "lead_speed": lead_v,
+            "lead_pos": self.lead_pos[idx_cur],   # <- current index, safe
+            "ego_speed": self.current_speed,
+            "ego_pos": self.ego_pos,
         }
+
+        # advance index last
+        self.idx = next_idx
+        truncated = False
 
         return obs, reward, terminated, truncated, info
 
@@ -615,30 +628,56 @@ class ModelEvaluationEnv():
         return self.model
 
     def test(self, metrics_summary_filename):
-
-        # ------------------------------------------------------------------------
-        # 5E) Test the model on the FULL 1200-step dataset in one go
-        # ------------------------------------------------------------------------
         test_env = TestEnv(full_speed_data, delta_t=1.0, reward_type=self.reward_type)
 
         obs, _ = test_env.reset()
-        predicted_speeds = []
-        reference_speeds = []
         rewards = []
+
+        # NEW: time-series we will save and plot
+        ego_speeds, ego_positions = [], []
+        lead_speeds, lead_positions = [], []
+        rel_distances = []
 
         for _ in range(DATA_LEN):
             action, _states = self.model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = test_env.step(action)
-            predicted_speeds.append(obs[0])  # current_speed
-            reference_speeds.append(obs[1])  # reference_speed
             rewards.append(reward)
+
+            # collect time-series from info
+            ego_speeds.append(info["ego_speed"])
+            ego_positions.append(info["ego_pos"])
+            lead_speeds.append(info["lead_speed"])
+            lead_positions.append(info["lead_pos"])
+            rel_distances.append(info["rel_distance"])
+
             if terminated or truncated:
                 break
 
-        avg_test_reward = np.mean(rewards)
+        avg_test_reward = float(np.mean(rewards))
         print(f"[TEST] Average reward over 1200-step test: {avg_test_reward:.3f}")
-        self.compute_metrics(reference_speeds=reference_speeds, predicted_speeds=predicted_speeds, rewards=rewards, avg_reward=avg_test_reward, filename=metrics_summary_filename)
-    
+
+        # keep your existing scalar metrics call (uses speeds if you like)
+        # You can pass lead as 'reference' and ego as 'predicted' to reuse compute_metrics:
+        self.compute_metrics(reference_speeds=lead_speeds, predicted_speeds=ego_speeds, rewards=rewards, avg_reward=avg_test_reward, filename=metrics_summary_filename)
+
+        # --- NEW: write a timeseries CSV for plotting ---
+        os.makedirs("metrics", exist_ok=True)
+        tag = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_el={self.episode_len}_ent={self.ent_coef}_ts={self.total_timesteps}"
+        ts_csv = os.path.join("metrics", f"timeseries_{tag}.csv")
+        pd.DataFrame({
+            "lead_speed": lead_speeds,
+            "ego_speed": ego_speeds,
+            "lead_pos": lead_positions,
+            "ego_pos": ego_positions,
+            "rel_distance": rel_distances,
+            "reward": rewards[:len(ego_speeds)]
+        }).to_csv(ts_csv, index=False)
+        print(f"[INFO] Wrote timeseries to {ts_csv}")
+
+        plot_lead_vs_ego(ts_csv, out_name=f"lead_ego_{tag}", algo=self.algo_name)
+        plot_lead_vs_ego_position_difference(ts_csv, out_name=f"lead_ego_{tag}", algo=self.algo_name)
+        plot_speed_difference(ts_csv, out_name=f"lead_ego_{tag}", algo=self.algo_name, band=1.0, smoothing=5)
+
 # ------------------------------------------------------------------------
 # Declare project tasks based on assignment document
 # ------------------------------------------------------------------------
