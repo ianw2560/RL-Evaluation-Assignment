@@ -22,35 +22,44 @@ import csv
 from plot_data import *
 
 # ------------------------------------------------------------------------
-# Create a lead vehicle that drives for 1200-steps
+# Define ego vehicle constraints
 # ------------------------------------------------------------------------
-SAFE_MIN_DIST = 5.0
-SAFE_MAX_DIST = 30.0
 
-ACCEL_MIN = -2.0  # m/s^2
-ACCEL_MAX =  2.0  # m/s^2
-MAX_JERK   =  1.0  # m/s^3  (|a_t - a_{t-1}| <= MAX_JERK * DT)
+# Following distance constraints
+MIN_DIST = 5.0
+MAX_DIST = 30.0
 
-# Reward weights
+# Acceleration constraints
+MIN_ACCEL = -2.0
+MAX_ACCEL = 2.0
+
+# Jerk constraint
+MAX_JERK = 1.0
+
+# ------------------------------------------------------------------------
+# Define ego vehicle training weights
+# ------------------------------------------------------------------------
+
+# Distance penalty
 W_DIST = 2.0     # distance-band penalty
+
+# Speed penalty
 W_SPEED = 1.0    # speed-matching penalty
-W_JERK = 0.2     # comfort penalty
-W_ACC_SOFT = 0.05  # soft push if hugging accel limits
+
+# Jerk penalty for comfort
+W_JERK = 0.2
+
+# soft push if hugging accel limits
+W_ACC_SOFT = 0.05
 
 def create_lead_vechicle(num_steps, csv_file="lead_vehicle_profile.csv"):
 
+    # Generate lead vehicle speed profile
     speed = 10 + 5 * np.sin(0.02 * np.arange(num_steps)) + 2 * np.random.randn(num_steps)
-
 
     position = np.zeros(num_steps)
     for i in range(1, num_steps):
         position[i] = position[i-1] + speed[i-1]
-
-    # df = pd.DataFrame({"speed": speed, "position": position})
-    # df.to_csv(csv_file, index=False)
-    # print(f"Created {csv_file} with {num_steps} steps.")
-
-
 
     return speed, position
 
@@ -73,8 +82,6 @@ assert len(full_speed_data) == DATA_LEN, "Dataset must be 1200 steps after gener
 # ------------------------------------------------------------------------
 # Create a 1200-step lead vehicle speed and position dataset
 # ------------------------------------------------------------------------
-
-
 lead_speed, lead_position = create_lead_vechicle(1200)
 
 # ------------------------------------------------------------------------
@@ -218,7 +225,7 @@ class TrainEnv(gym.Env):
         self.reward_type = reward_type
 
         # Action: desired acceleration with physical limits
-        self.action_space = spaces.Box(low=ACCEL_MIN, high=ACCEL_MAX, shape=(1,), dtype=np.float32)
+        self.action_space = spaces.Box(low=MIN_ACCEL, high=MAX_ACCEL, shape=(1,), dtype=np.float32)
         # Observation: [ego_speed, lead_speed, rel_distance]
         self.observation_space = spaces.Box(low=np.array([0.0, 0.0, 0.0], dtype=np.float32),
                                             high=np.array([50.0, 50.0, 200.0], dtype=np.float32),
@@ -241,17 +248,17 @@ class TrainEnv(gym.Env):
         if self.reward_type != "lead_vehicle":
             raise ValueError(f"Unknown reward_type: {self.reward_type}")
 
-        # Distance band penalty (quadratic outside [SAFE_MIN_DIST, SAFE_MAX_DIST])
-        if rel_d < SAFE_MIN_DIST:
-            dist_pen = (SAFE_MIN_DIST - rel_d) ** 2
-        elif rel_d > SAFE_MAX_DIST:
-            dist_pen = (rel_d - SAFE_MAX_DIST) ** 2
+        # Distance band penalty (quadratic outside [MIN_DIST, MAX_DIST])
+        if rel_d < MIN_DIST:
+            dist_pen = (MIN_DIST - rel_d) ** 2
+        elif rel_d > MAX_DIST:
+            dist_pen = (rel_d - MAX_DIST) ** 2
         else:
             dist_pen = 0.0
 
         speed_pen = dv * dv                       # (ego - lead)^2
         jerk_pen = jerk * jerk                    # comfort
-        acc_soft_pen = max(0.0, abs(accel) - 0.8 * ACCEL_MAX) ** 2  # discourage banging limits
+        acc_soft_pen = max(0.0, abs(accel) - 0.8 * MAX_ACCEL) ** 2  # discourage banging limits
 
         reward = -(W_DIST * dist_pen + W_SPEED * speed_pen + W_JERK * jerk_pen + W_ACC_SOFT * acc_soft_pen)
 
@@ -280,10 +287,10 @@ class TrainEnv(gym.Env):
         return obs, info
 
     def step(self, action):
-        a_des = float(np.clip(action[0], ACCEL_MIN, ACCEL_MAX))
+        a_des = float(np.clip(action[0], MIN_ACCEL, MAX_ACCEL))
         a_delta_max = MAX_JERK * self.delta_t
         a = float(np.clip(a_des, self.last_accel - a_delta_max, self.last_accel + a_delta_max))
-        a = float(np.clip(a, ACCEL_MIN, ACCEL_MAX))
+        a = float(np.clip(a, MIN_ACCEL, MAX_ACCEL))
         jerk = (a - self.last_accel) / self.delta_t
         self.last_accel = a
 
@@ -338,7 +345,7 @@ class TestEnv(gym.Env):
         self.delta_t = delta_t
         self.reward_type = reward_type
 
-        self.action_space = spaces.Box(low=ACCEL_MIN, high=ACCEL_MAX, shape=(1,), dtype=np.float32)
+        self.action_space = spaces.Box(low=MIN_ACCEL, high=MAX_ACCEL, shape=(1,), dtype=np.float32)
         self.observation_space = spaces.Box(low=np.array([0.0, 0.0, 0.0], dtype=np.float32),
                                             high=np.array([50.0, 50.0, 200.0], dtype=np.float32),
                                             dtype=np.float32)
@@ -362,16 +369,16 @@ class TestEnv(gym.Env):
         if self.reward_type != "lead_vehicle":
             raise ValueError(f"Unknown reward_type: {self.reward_type}")
 
-        if rel_d < SAFE_MIN_DIST:
-            dist_pen = (SAFE_MIN_DIST - rel_d) ** 2
-        elif rel_d > SAFE_MAX_DIST:
-            dist_pen = (rel_d - SAFE_MAX_DIST) ** 2
+        if rel_d < MIN_DIST:
+            dist_pen = (MIN_DIST - rel_d) ** 2
+        elif rel_d > MAX_DIST:
+            dist_pen = (rel_d - MAX_DIST) ** 2
         else:
             dist_pen = 0.0
 
         speed_pen = dv * dv
         jerk_pen = jerk * jerk
-        acc_soft_pen = max(0.0, abs(accel) - 0.8 * ACCEL_MAX) ** 2
+        acc_soft_pen = max(0.0, abs(accel) - 0.8 * MAX_ACCEL) ** 2
 
         reward = -(W_DIST * dist_pen + W_SPEED * speed_pen + W_JERK * jerk_pen + W_ACC_SOFT * acc_soft_pen)
         return reward
@@ -390,10 +397,10 @@ class TestEnv(gym.Env):
         return obs, info
 
     def step(self, action):
-        a_des = float(np.clip(action[0], ACCEL_MIN, ACCEL_MAX))
+        a_des = float(np.clip(action[0], MIN_ACCEL, MAX_ACCEL))
         a_delta_max = MAX_JERK * self.delta_t
         a = float(np.clip(a_des, self.last_accel - a_delta_max, self.last_accel + a_delta_max))
-        a = float(np.clip(a, ACCEL_MIN, ACCEL_MAX))
+        a = float(np.clip(a, MIN_ACCEL, MAX_ACCEL))
         jerk = (a - self.last_accel) / self.delta_t
         self.last_accel = a
 
@@ -472,7 +479,7 @@ class CustomLoggingCallback(BaseCallback):
 
 class ModelEvaluationEnv():
 
-    def __init__(self, log_dir="logs_chunk_training", algo_name="SAC", learning_rate=3e-4, batch_size=256, reward_type="abs", sac_ent_coef="auto", ppo_ent_coef=0.0, total_timesteps=100_000, episode_len=100, models_dir="trained_models"):
+    def __init__(self, log_dir="logs", algo_name="SAC", learning_rate=3e-4, batch_size=256, reward_type="abs", sac_ent_coef="auto", ppo_ent_coef=0.0, total_timesteps=100_000, episode_len=100, models_dir="trained_models"):
         self.algo_name = algo_name
         self.learning_rate = learning_rate
         self.batch_size = batch_size
@@ -633,22 +640,22 @@ class ModelEvaluationEnv():
         obs, _ = test_env.reset()
         rewards = []
 
-        # NEW: time-series we will save and plot
         ego_speeds, ego_positions = [], []
         lead_speeds, lead_positions = [], []
         rel_distances = []
+        jerks = []
 
         for _ in range(DATA_LEN):
             action, _states = self.model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = test_env.step(action)
             rewards.append(reward)
 
-            # collect time-series from info
             ego_speeds.append(info["ego_speed"])
             ego_positions.append(info["ego_pos"])
             lead_speeds.append(info["lead_speed"])
             lead_positions.append(info["lead_pos"])
             rel_distances.append(info["rel_distance"])
+            jerks.append(info["jerk"])
 
             if terminated or truncated:
                 break
@@ -656,27 +663,38 @@ class ModelEvaluationEnv():
         avg_test_reward = float(np.mean(rewards))
         print(f"[TEST] Average reward over 1200-step test: {avg_test_reward:.3f}")
 
-        # keep your existing scalar metrics call (uses speeds if you like)
-        # You can pass lead as 'reference' and ego as 'predicted' to reuse compute_metrics:
-        self.compute_metrics(reference_speeds=lead_speeds, predicted_speeds=ego_speeds, rewards=rewards, avg_reward=avg_test_reward, filename=metrics_summary_filename)
+        # Calculate metrics
+        self.compute_metrics(
+            reference_speeds=lead_speeds,
+            predicted_speeds=ego_speeds,
+            rewards=rewards,
+            avg_reward=avg_test_reward,
+            filename=metrics_summary_filename,
+        )
 
-        # --- NEW: write a timeseries CSV for plotting ---
+        # write the timeseries CSV
         os.makedirs("metrics", exist_ok=True)
-        tag = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_el={self.episode_len}_ent={self.ent_coef}_ts={self.total_timesteps}"
-        ts_csv = os.path.join("metrics", f"timeseries_{tag}.csv")
+
+        out_name = self.trained_model_name[:-4]
+        data_csv = os.path.join("metrics", f"lead_vs_ego_data_{out_name}.csv")
+
+        
         pd.DataFrame({
             "lead_speed": lead_speeds,
             "ego_speed": ego_speeds,
             "lead_pos": lead_positions,
             "ego_pos": ego_positions,
             "rel_distance": rel_distances,
-            "reward": rewards[:len(ego_speeds)]
-        }).to_csv(ts_csv, index=False)
-        print(f"[INFO] Wrote timeseries to {ts_csv}")
+            "jerk": jerks,
+            "reward": rewards[:len(ego_speeds)],
+        }).to_csv(data_csv, index=False)
+        print(f"[INFO] Wrote timeseries to {data_csv}")
 
-        plot_lead_vs_ego(ts_csv, out_name=f"lead_ego_{tag}", algo=self.algo_name)
-        plot_lead_vs_ego_position_difference(ts_csv, out_name=f"lead_ego_{tag}", algo=self.algo_name)
-        plot_speed_difference(ts_csv, out_name=f"lead_ego_{tag}", algo=self.algo_name, band=1.0, smoothing=5)
+
+
+        plot_lead_vs_ego(data_csv, out_name=f"{out_name}", algo=self.algo_name)
+        plot_position_difference(data_csv, out_name=f"{out_name}", algo=self.algo_name)
+        plot_speed_difference(data_csv, out_name=f"{out_name}", algo=self.algo_name, band=1.0)
 
 # ------------------------------------------------------------------------
 # Declare project tasks based on assignment document
@@ -825,7 +843,7 @@ def main():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="./logs_chunk_training",
+        default="./logs",
         help="Directory to store logs and trained model."
     )
     parser.add_argument(
