@@ -234,6 +234,9 @@ def plot_lead_vs_ego(csv_path, out_name, algo, save_dir="images"):
     if len(jerk) != T:
         jerk = np.resize(jerk, T)
 
+
+
+
     # Plot speed
     plt.figure(figsize=(10, 4))
     plt.plot(t, lead_speed, label="Lead Speed", linestyle="--")
@@ -244,7 +247,7 @@ def plot_lead_vs_ego(csv_path, out_name, algo, save_dir="images"):
     plt.grid(alpha=0.3)
     plt.legend()
     plt.tight_layout()
-    out_speed = os.path.join(save_dir, f"speeds_{out_name}.png")
+    out_speed = os.path.join(save_dir, f"{out_name}_speeds.png")
     plt.savefig(out_speed, dpi=300)
     plt.close()
 
@@ -258,7 +261,7 @@ def plot_lead_vs_ego(csv_path, out_name, algo, save_dir="images"):
     plt.grid(alpha=0.3)
     plt.legend()
     plt.tight_layout()
-    out_pos = os.path.join(save_dir, f"positions_{out_name}.png")
+    out_pos = os.path.join(save_dir, f"{out_name}_positions.png")
     plt.savefig(out_pos, dpi=300)
     plt.close()
 
@@ -272,7 +275,7 @@ def plot_lead_vs_ego(csv_path, out_name, algo, save_dir="images"):
     plt.grid(alpha=0.3)
     plt.legend()
     plt.tight_layout()
-    out_jerk = os.path.join(save_dir, f"jerks_{out_name}.png")
+    out_jerk = os.path.join(save_dir, f"{out_name}_jerks.png")
     plt.savefig(out_jerk, dpi=300)
     plt.close()
 
@@ -317,7 +320,7 @@ def plot_position_difference(csv_path, out_name, algo=None, save_dir="images", d
     plt.legend()
     plt.tight_layout()
 
-    out_path = os.path.join(save_dir, f"position_difference_{out_name}.png")
+    out_path = os.path.join(save_dir, f"{out_name}_position_difference.png")
     plt.savefig(out_path, dpi=300)
     plt.close()
 
@@ -369,7 +372,7 @@ def plot_speed_difference(csv_path, out_name, algo=None, save_dir="images", band
     plt.legend()
     plt.tight_layout()
 
-    out_path = os.path.join(save_dir, f"speed_difference_{out_name}.png")
+    out_path = os.path.join(save_dir, f"{out_name}_speed_difference.png")
     plt.savefig(out_path, dpi=300)
     plt.close()
 

@@ -226,27 +226,23 @@ class TrainEnv(gym.Env):
         # Action: desired acceleration with physical limits
         self.action_space = spaces.Box(low=MIN_ACCEL, high=MAX_ACCEL, shape=(1,), dtype=np.float32)
         # Observation: [ego_speed, lead_speed, rel_distance]
-        self.observation_space = spaces.Box(
-            low=np.array([0.0, 0.0, 0.0], dtype=np.float32),
-            high=np.array([50.0, 50.0, 200.0], dtype=np.float32),
-            dtype=np.float32
-        )
+        self.observation_space = spaces.Box(low=np.array([0.0, 0.0, 0.0], dtype=np.float32),
+                                            high=np.array([50.0, 50.0, 200.0], dtype=np.float32),
+                                            dtype=np.float32)
 
-        # Episode state
+        # Keep existing member names; add a few for ACC
         self.current_episode = None
         self.episode_len = 0
-        self.idx = 0
-
-        # Ego state
-        self.current_speed = 0.0   # ego speed
-        self.ref_speed = 0.0       # we reuse this name to carry lead speed for compat
+        self.step_idx = 0
+        self.current_speed = 0.0      # ego speed
+        self.ref_speed = 0.0          # here we use this slot to also store lead speed for backwards-compat
         self.ego_pos = 0.0
         self.last_accel = 0.0
 
-        # Lead state
         self.lead_speed = None
         self.lead_pos = None
 
+    # New, simplified reward: ACC distance band + speed match + jerk + soft accel limit
     def compute_reward(self, rel_d, dv, jerk, accel):
         if self.reward_type != "lead_vehicle":
             raise ValueError(f"Unknown reward_type: {self.reward_type}")
@@ -259,22 +255,21 @@ class TrainEnv(gym.Env):
         else:
             dist_pen = 0.0
 
-        speed_pen = dv * dv
-        jerk_pen = jerk * jerk
-        acc_soft_pen = max(0.0, abs(accel) - 0.8 * MAX_ACCEL) ** 2
+        speed_pen = dv * dv                       # (ego - lead)^2
+        jerk_pen = jerk * jerk                    # comfort
+        acc_soft_pen = max(0.0, abs(accel) - 0.8 * MAX_ACCEL) ** 2  # discourage banging limits
 
-        return -(W_DIST * dist_pen + W_SPEED * speed_pen + W_JERK * jerk_pen + W_ACC_SOFT * acc_soft_pen)
+        reward = -(W_DIST * dist_pen + W_SPEED * speed_pen + W_JERK * jerk_pen + W_ACC_SOFT * acc_soft_pen)
+
+        return reward
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-
-        # Pick a random chunk/episode
         ep_idx = np.random.randint(0, self.num_episodes)
         self.current_episode = self.episodes_list[ep_idx]
         self.episode_len = len(self.current_episode)
 
-        # Reset indices and states
-        self.idx = 0
+        self.step_idx = 0
         self.current_speed = 0.0
         self.ego_pos = 0.0
         self.last_accel = 0.0
@@ -282,19 +277,17 @@ class TrainEnv(gym.Env):
         # Fresh lead profile per episode (promotes generalization)
         self.lead_speed, self.lead_pos = create_lead_vechicle(self.episode_len)
 
-        # Initial observation
+        # Build initial obs
         rel_d0 = max(self.lead_pos[0] - self.ego_pos, 0.0)
-        self.ref_speed = self.lead_speed[0]
+        self.ref_speed = self.lead_speed[0]  # use ref_speed field to carry lead_speed (preserves name)
         obs = np.array([self.current_speed, self.ref_speed, rel_d0], dtype=np.float32)
         info = {}
+
         return obs, info
 
     def step(self, action):
-        # Robustly get scalar desired accel
-        a_des = float(np.asarray(action)[0])
-        a_des = float(np.clip(a_des, MIN_ACCEL, MAX_ACCEL))
-
-        # Jerk limiting
+        # Desired accel with clip and jerk rate-limit
+        a_des = float(np.clip(action[0], MIN_ACCEL, MAX_ACCEL))
         a_delta_max = MAX_JERK * self.delta_t
         a = float(np.clip(a_des, self.last_accel - a_delta_max, self.last_accel + a_delta_max))
         a = float(np.clip(a, MIN_ACCEL, MAX_ACCEL))
@@ -305,24 +298,26 @@ class TrainEnv(gym.Env):
         self.current_speed = max(self.current_speed + a * self.delta_t, 0.0)
         self.ego_pos += self.current_speed * self.delta_t
 
-        # Signals at current index
-        idx_cur = self.idx
+        # --- use the current index for signals & logging ---
+        idx_cur = self.step_idx
         lead_v = self.lead_speed[idx_cur]
         rel_d  = max(self.lead_pos[idx_cur] - self.ego_pos, 0.0)
         dv     = self.current_speed - lead_v
 
         reward = self.compute_reward(rel_d, dv, jerk, a)
 
-        # Advance/clamp for next obs (use episode_len here, not n_steps)
+        # Prepare next index and obs (avoid off-by-one)
         next_idx = idx_cur + 1
         terminated = (next_idx >= self.episode_len)
         idx_for_obs = self.episode_len - 1 if terminated else next_idx
 
-        ref_speed_next = self.lead_speed[idx_for_obs]
-        next_rel_d     = max(self.lead_pos[idx_for_obs] - self.ego_pos, 0.0)
-        obs = np.array([self.current_speed, ref_speed_next, next_rel_d], dtype=np.float32)
+        # Next obs
+        next_lead_v = self.lead_speed[idx_for_obs]
+        next_rel_d  = max(self.lead_pos[idx_for_obs] - self.ego_pos, 0.0)
+        self.ref_speed = next_lead_v
+        obs = np.array([self.current_speed, self.ref_speed, next_rel_d], dtype=np.float32)
 
-        # Info BEFORE advancing idx
+        # --- build info BEFORE advancing step_idx ---
         info = {
             "speed_error": abs(dv),
             "reward_type": self.reward_type,
@@ -330,16 +325,17 @@ class TrainEnv(gym.Env):
             "speed_diff": dv,
             "jerk": jerk,
             "lead_speed": lead_v,
-            "lead_pos": self.lead_pos[idx_cur],
+            "lead_pos": self.lead_pos[idx_cur],   # use idx_cur, not self.step_idx after increment
             "ego_speed": self.current_speed,
             "ego_pos": self.ego_pos,
         }
 
-        # Advance index
-        self.idx = next_idx
+        # advance index last
+        self.step_idx = next_idx
         truncated = False
 
         return obs, reward, terminated, truncated, info
+
 
 # ------------------------------------------------------------------------
 # 3B) Test Environment with same reward flexibility
