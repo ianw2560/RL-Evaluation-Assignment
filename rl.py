@@ -212,259 +212,262 @@ def plot_learningrate_vs_metric(csv_path, out_name, metric="MAE", save_dir="imag
 
     print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
 
-# ------------------------------------------------------------------------
-# 3A) Training Environment: picks a random chunk each reset
-# ------------------------------------------------------------------------
-class TrainEnv(gym.Env):
-    def __init__(self, episodes_list, delta_t=1.0, reward_type="lead_vehicle"):
+class BaseACCEnv(gym.Env):
+    """
+    Base class for ACC environments.
+
+    Action:
+        desired ego acceleration in [MIN_ACCEL, MAX_ACCEL] (m/s^2)
+    Observation:
+        [ego_speed, lead_speed, rel_distance_clamped>=0]
+    """
+
+    def __init__(self, delta_t=1.0):
         super().__init__()
-        self.episodes_list = episodes_list
-        self.num_episodes = len(episodes_list)
+
         self.delta_t = delta_t
-        self.reward_type = reward_type
 
         # Action: desired acceleration with physical limits
-        self.action_space = spaces.Box(low=MIN_ACCEL, high=MAX_ACCEL, shape=(1,), dtype=np.float32)
-        # Observation: [ego_speed, lead_speed, rel_distance]
-        self.observation_space = spaces.Box(low=np.array([0.0, 0.0, 0.0], dtype=np.float32),
-                                            high=np.array([50.0, 50.0, 200.0], dtype=np.float32),
-                                            dtype=np.float32)
+        self.action_space = spaces.Box(
+            low=MIN_ACCEL,
+            high=MAX_ACCEL,
+            shape=(1,),
+            dtype=np.float32,
+        )
 
-        # Keep existing member names; add a few for ACC
-        self.current_episode = None
-        self.episode_len = 0
-        self.step_idx = 0
-        self.current_speed = 0.0      # ego speed
-        self.ref_speed = 0.0          # here we use this slot to also store lead speed for backwards-compat
-        self.ego_pos = 0.0
-        self.last_accel = 0.0
+        # Observation: [ego_speed, lead_speed, rel_distance>=0]
+        self.observation_space = spaces.Box(
+            low=np.array([0.0, 0.0, 0.0], dtype=np.float32),
+            high=np.array([50.0, 50.0, 200.0], dtype=np.float32),
+            dtype=np.float32,
+        )
 
-        self.lead_speed = None
-        self.lead_pos = None
-
-    # New, simplified reward: ACC distance band + speed match + jerk + soft accel limit
-    def compute_reward(self, rel_d, dv, jerk, accel):
-        if self.reward_type != "lead_vehicle":
-            raise ValueError(f"Unknown reward_type: {self.reward_type}")
-
-        # Distance band penalty (quadratic outside [MIN_DIST, MAX_DIST])
-        if rel_d < MIN_DIST:
-            dist_pen = (MIN_DIST - rel_d) ** 2
-        elif rel_d > MAX_DIST:
-            dist_pen = (rel_d - MAX_DIST) ** 2
-        else:
-            dist_pen = 0.0
-
-        speed_pen = dv * dv                       # (ego - lead)^2
-        jerk_pen = jerk * jerk                    # comfort
-        acc_soft_pen = max(0.0, abs(accel) - 0.8 * MAX_ACCEL) ** 2  # discourage banging limits
-
-        reward = -(W_DIST * dist_pen + W_SPEED * speed_pen + W_JERK * jerk_pen + W_ACC_SOFT * acc_soft_pen)
-
-        return reward
-
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        ep_idx = np.random.randint(0, self.num_episodes)
-        self.current_episode = self.episodes_list[ep_idx]
-        self.episode_len = len(self.current_episode)
-
+        # Ego state
         self.step_idx = 0
         self.current_speed = 0.0
         self.ego_pos = 0.0
         self.last_accel = 0.0
 
-        # Fresh lead profile per episode (promotes generalization)
-        self.lead_speed, self.lead_pos = create_lead_vechicle(self.episode_len)
+        # Lead vehicle state (per episode)
+        self.lead_speed = None  # np.array
+        self.lead_pos = None    # np.array
+        self.episode_len = 0
 
-        # Build initial obs
-        rel_d0 = max(self.lead_pos[0] - self.ego_pos, 0.0)
-        self.ref_speed = self.lead_speed[0]  # use ref_speed field to carry lead_speed (preserves name)
-        obs = np.array([self.current_speed, self.ref_speed, rel_d0], dtype=np.float32)
+    # ------------------------------------------------------------------
+    # Hooks to be implemented by subclasses
+    # ------------------------------------------------------------------
+    def _reset_lead_profile(self, seed=None):
+        """
+        Subclasses must:
+            - set self.lead_speed (array shape [episode_len])
+            - set self.lead_pos   (array shape [episode_len])
+            - set self.episode_len (int)
+        """
+        raise NotImplementedError
+
+    # ------------------------------------------------------------------
+    # Reward function (with fixes)
+    # ------------------------------------------------------------------
+    def compute_reward(self, gap, speed_diff, jerk, accel):
+        """
+        Reward based on:
+
+          - distance to a target following distance (using raw signed gap)
+          - speed difference (ego vs lead)
+          - jerk (comfort)
+          - soft penalty near accel limits
+        """
+
+        # Use a target following distance in the middle of [MIN_DIST, MAX_DIST]
+        target_dist = 0.5 * (MIN_DIST + MAX_DIST)
+
+        # gap is lead_pos - ego_pos (can be negative if ego is ahead)
+        dist_error = gap - target_dist
+        dist_pen = dist_error ** 2
+
+        speed_pen = speed_diff * speed_diff
+        jerk_pen = jerk * jerk
+        acc_soft_pen = max(0.0, abs(accel) - 0.8 * MAX_ACCEL) ** 2
+
+        reward = -(
+            W_DIST * dist_pen
+            + W_SPEED * speed_pen
+            + W_JERK * jerk_pen
+            + W_ACC_SOFT * acc_soft_pen
+        )
+
+        # Optional scaling to keep magnitudes reasonable
+        reward /= 1000.0
+        return reward
+
+    # ------------------------------------------------------------------
+    # Gym API
+    # ------------------------------------------------------------------
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+
+        # Subclass defines lead profile and episode length
+        self._reset_lead_profile(seed)
+
+        # Reset ego state
+        self.step_idx = 0
+        self.current_speed = 0.0
+        self.ego_pos = 0.0
+        self.last_accel = 0.0
+
+        # Initial observation
+        gap = self.lead_pos[0] - self.ego_pos               # raw (can be negative)
+        rel_distance = max(gap, 0.0)                         # clamped for obs
+        lead_speed = self.lead_speed[0]
+
+        obs = np.array(
+            [self.current_speed, lead_speed, rel_distance],
+            dtype=np.float32,
+        )
         info = {}
-
         return obs, info
 
     def step(self, action):
-        # Desired accel with clip and jerk rate-limit
-        a_des = float(np.clip(action[0], MIN_ACCEL, MAX_ACCEL))
-        a_delta_max = MAX_JERK * self.delta_t
-        a = float(np.clip(a_des, self.last_accel - a_delta_max, self.last_accel + a_delta_max))
-        a = float(np.clip(a, MIN_ACCEL, MAX_ACCEL))
-        jerk = (a - self.last_accel) / self.delta_t
-        self.last_accel = a
+        # --------------------------------------------------------------
+        # 1) Process action: clip + jerk limit
+        # --------------------------------------------------------------
+        desired_accel = float(np.clip(action[0], MIN_ACCEL, MAX_ACCEL))
+        max_accel_delta = MAX_JERK * self.delta_t
 
-        # Integrate ego
-        self.current_speed = max(self.current_speed + a * self.delta_t, 0.0)
+        accel_limited = np.clip(
+            desired_accel,
+            self.last_accel - max_accel_delta,
+            self.last_accel + max_accel_delta,
+        )
+        ego_accel = float(np.clip(accel_limited, MIN_ACCEL, MAX_ACCEL))
+
+        jerk = (ego_accel - self.last_accel) / self.delta_t
+        self.last_accel = ego_accel
+
+        # --------------------------------------------------------------
+        # 2) Integrate ego dynamics
+        # --------------------------------------------------------------
+        self.current_speed = max(self.current_speed + ego_accel * self.delta_t, 0.0)
         self.ego_pos += self.current_speed * self.delta_t
 
-        # --- use the current index for signals & logging ---
-        idx_cur = self.step_idx
-        lead_v = self.lead_speed[idx_cur]
-        rel_d  = max(self.lead_pos[idx_cur] - self.ego_pos, 0.0)
-        dv     = self.current_speed - lead_v
+        # --------------------------------------------------------------
+        # 3) Lead / relative states at current index
+        # --------------------------------------------------------------
+        idx = self.step_idx
+        lead_speed = self.lead_speed[idx]
+        gap = self.lead_pos[idx] - self.ego_pos             # raw gap (can be negative)
+        rel_distance = max(gap, 0.0)                        # clamped for obs/info
+        speed_diff = self.current_speed - lead_speed
 
-        reward = self.compute_reward(rel_d, dv, jerk, a)
+        reward = self.compute_reward(gap, speed_diff, jerk, ego_accel)
 
-        if idx_cur == 0:
+        # Lead acceleration (finite difference)
+        if idx == 0:
             lead_accel = 0.0
         else:
-            lead_accel = (self.lead_speed[idx_cur] - self.lead_speed[idx_cur - 1]) / self.delta_t
+            lead_accel = (self.lead_speed[idx] - self.lead_speed[idx - 1]) / self.delta_t
 
-        acc_diff = a - lead_accel
+        acc_diff = ego_accel - lead_accel
 
-        # Prepare next index and obs (avoid off-by-one)
-        next_idx = idx_cur + 1
-        terminated = (next_idx >= self.episode_len)
-        idx_for_obs = self.episode_len - 1 if terminated else next_idx
+        # --------------------------------------------------------------
+        # 4) Next observation & termination
+        # --------------------------------------------------------------
+        next_idx = idx + 1
+        terminated = next_idx >= self.episode_len
+        obs_index = self.episode_len - 1 if terminated else next_idx
 
-        # Next obs
-        next_lead_v = self.lead_speed[idx_for_obs]
-        next_rel_d  = max(self.lead_pos[idx_for_obs] - self.ego_pos, 0.0)
-        self.ref_speed = next_lead_v
-        obs = np.array([self.current_speed, self.ref_speed, next_rel_d], dtype=np.float32)
+        next_lead_speed = self.lead_speed[obs_index]
+        next_gap = self.lead_pos[obs_index] - self.ego_pos
+        next_rel_distance = max(next_gap, 0.0)
 
-        # --- build info BEFORE advancing step_idx ---
+        obs = np.array(
+            [self.current_speed, next_lead_speed, next_rel_distance],
+            dtype=np.float32,
+        )
+
+        # --------------------------------------------------------------
+        # 5) Info dict (before advancing index)
+        # --------------------------------------------------------------
         info = {
-            "speed_error": abs(dv),
-            "reward_type": self.reward_type,
-            "rel_distance": rel_d,
-            "speed_diff": dv,
+            "speed_error": abs(speed_diff),
+            "rel_distance": rel_distance,   # clamped
+            "gap_raw": gap,                 # optional: raw signed gap
+            "speed_diff": speed_diff,
             "jerk": jerk,
-            "lead_speed": lead_v,
-            "lead_pos": self.lead_pos[idx_cur],
+            "lead_speed": lead_speed,
+            "lead_pos": self.lead_pos[idx],
             "ego_speed": self.current_speed,
             "ego_pos": self.ego_pos,
-            "ego_accel": a,
+            "ego_accel": ego_accel,
             "lead_accel": lead_accel,
             "acc_diff": acc_diff,
         }
-        # advance index last
+
+        # --------------------------------------------------------------
+        # 6) Advance time index
+        # --------------------------------------------------------------
         self.step_idx = next_idx
         truncated = False
 
         return obs, reward, terminated, truncated, info
 
+# ------------------------------------------------------------------------
+# 3A) Training Environment: picks a random chunk each reset
+# ------------------------------------------------------------------------
+class TrainEnv(BaseACCEnv):
+    """
+    Training environment: each reset picks a random chunk from episodes_list
+    and creates a fresh lead vehicle profile for that episode.
+    """
+    def __init__(self, episodes_list, delta_t=1.0):
+        self.episodes_list = episodes_list
+        self.num_episodes = len(episodes_list)
+        self.current_episode = None
+        super().__init__(delta_t=delta_t)
+
+    def _reset_lead_profile(self, seed=None):
+        # Randomly select an episode/chunk
+        episode_index = np.random.randint(0, self.num_episodes)
+        self.current_episode = self.episodes_list[episode_index]
+        self.episode_len = len(self.current_episode)
+
+        # Fresh lead profile for this episode (promotes generalization)
+        self.lead_speed, self.lead_pos = create_lead_vechicle(self.episode_len)
+
 
 # ------------------------------------------------------------------------
 # 3B) Test Environment with same reward flexibility
 # ------------------------------------------------------------------------
-class TestEnv(gym.Env):
-    def __init__(self, full_data, delta_t=1.0, reward_type="lead_vehicle"):
-        super().__init__()
+class TestEnv(BaseACCEnv):
+    """
+    Test environment: uses a deterministic lead vehicle profile over the full
+    dataset for reproducible evaluation.
+    """
+    def __init__(self, full_data, delta_t=1.0):
         self.full_data = full_data
         self.n_steps = len(full_data)
-        self.delta_t = delta_t
-        self.reward_type = reward_type
 
-        self.action_space = spaces.Box(low=MIN_ACCEL, high=MAX_ACCEL, shape=(1,), dtype=np.float32)
-        self.observation_space = spaces.Box(low=np.array([0.0, 0.0, 0.0], dtype=np.float32),
-                                            high=np.array([50.0, 50.0, 200.0], dtype=np.float32),
-                                            dtype=np.float32)
-
-        self.idx = 0
-        self.current_speed = 0.0
-        self.ego_pos = 0.0
-        self.last_accel = 0.0
-
-        # Deterministic lead (fixed seed) for reproducible evaluation
+        # Precompute deterministic lead profile (same as before)
         rng = np.random.RandomState(42)
         t = np.arange(self.n_steps)
         noise = rng.normal(0, 0.5, size=self.n_steps)
-        self.lead_speed = np.clip(12.0 + 4.0 * np.sin(0.02 * t) + noise, 0.0, None)
-        self.lead_pos = np.zeros(self.n_steps)
+        lead_speed = np.clip(12.0 + 4.0 * np.sin(0.02 * t) + noise, 0.0, None)
+
+        lead_pos = np.zeros(self.n_steps)
         for i in range(1, self.n_steps):
-            self.lead_pos[i] = self.lead_pos[i-1] + self.lead_speed[i-1] * self.delta_t
+            lead_pos[i] = lead_pos[i - 1] + lead_speed[i - 1] * delta_t
 
-    # Same simplified ACC reward as TrainEnv
-    def compute_reward(self, rel_d, dv, jerk, accel):
-        if self.reward_type != "lead_vehicle":
-            raise ValueError(f"Unknown reward_type: {self.reward_type}")
+        # Store profiles; they'll be used every reset
+        self._lead_speed_profile = lead_speed
+        self._lead_pos_profile = lead_pos
 
-        if rel_d < MIN_DIST:
-            dist_pen = (MIN_DIST - rel_d) ** 2
-        elif rel_d > MAX_DIST:
-            dist_pen = (rel_d - MAX_DIST) ** 2
-        else:
-            dist_pen = 0.0
+        super().__init__(delta_t=delta_t)
 
-        speed_pen = dv * dv
-        jerk_pen = jerk * jerk
-        acc_soft_pen = max(0.0, abs(accel) - 0.8 * MAX_ACCEL) ** 2
-
-        reward = -(W_DIST * dist_pen + W_SPEED * speed_pen + W_JERK * jerk_pen + W_ACC_SOFT * acc_soft_pen)
-        return reward
-
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        self.idx = 0
-        self.current_speed = 0.0
-        self.ego_pos = 0.0
-        self.last_accel = 0.0
-
-        rel_d0 = max(self.lead_pos[0] - self.ego_pos, 0.0)
-        ref_speed = self.lead_speed[0]     # keep your variable name; it's lead speed here
-        obs = np.array([self.current_speed, ref_speed, rel_d0], dtype=np.float32)
-        info = {}
-        return obs, info
-
-    def step(self, action):
-        a_des = float(np.clip(action[0], MIN_ACCEL, MAX_ACCEL))
-        a_delta_max = MAX_JERK * self.delta_t
-        a = float(np.clip(a_des, self.last_accel - a_delta_max, self.last_accel + a_delta_max))
-        a = float(np.clip(a, MIN_ACCEL, MAX_ACCEL))
-        jerk = (a - self.last_accel) / self.delta_t
-        self.last_accel = a
-
-        # Integrate ego
-        self.current_speed = max(self.current_speed + a * self.delta_t, 0.0)
-        self.ego_pos += self.current_speed * self.delta_t
-
-        # --- use the current index for signals & logging ---
-        idx_cur = self.idx
-        lead_v = self.lead_speed[idx_cur]
-        rel_d  = max(self.lead_pos[idx_cur] - self.ego_pos, 0.0)
-        dv     = self.current_speed - lead_v
-
-        reward = self.compute_reward(rel_d, dv, jerk, a)
-
-        # --- lead acceleration (finite difference) ---
-        if idx_cur == 0:
-            lead_accel = 0.0
-        else:
-            lead_accel = (self.lead_speed[idx_cur] - self.lead_speed[idx_cur - 1]) / self.delta_t
-
-        acc_diff = a - lead_accel
-
-        # Prepare next index and obs (avoid off-by-one by clamping)
-        next_idx = idx_cur + 1
-        terminated = (next_idx >= self.n_steps)
-        idx_for_obs = self.n_steps - 1 if terminated else next_idx
-
-        ref_speed_next = self.lead_speed[idx_for_obs]
-        next_rel_d     = max(self.lead_pos[idx_for_obs] - self.ego_pos, 0.0)
-        obs = np.array([self.current_speed, ref_speed_next, next_rel_d], dtype=np.float32)
-
-        # --- build info BEFORE advancing self.idx ---
-        info = {
-            "speed_error": abs(dv),
-            "reward_type": self.reward_type,
-            "rel_distance": rel_d,
-            "speed_diff": dv,
-            "jerk": jerk,
-            "lead_speed": lead_v,
-            "lead_pos": self.lead_pos[idx_cur],
-            "ego_speed": self.current_speed,
-            "ego_pos": self.ego_pos,
-            "ego_accel": a,
-            "lead_accel": lead_accel,
-            "acc_diff": acc_diff,
-        }
-        # advance index last
-        self.idx = next_idx
-        truncated = False
-
-        return obs, reward, terminated, truncated, info
+    def _reset_lead_profile(self, seed=None):
+        # Reuse the same deterministic profile each episode
+        self.lead_speed = self._lead_speed_profile
+        self.lead_pos = self._lead_pos_profile
+        self.episode_len = self.n_steps
 
 
 # ------------------------------------------------------------------------
@@ -501,11 +504,10 @@ class CustomLoggingCallback(BaseCallback):
 
 class ModelEvaluationEnv():
 
-    def __init__(self, log_dir="logs", algo_name="SAC", learning_rate=3e-4, batch_size=256, reward_type="abs", sac_ent_coef="auto", ppo_ent_coef=0.0, total_timesteps=100_000, episode_len=100, models_dir="trained_models"):
+    def __init__(self, log_dir="logs", algo_name="SAC", learning_rate=3e-4, batch_size=256, sac_ent_coef="auto", ppo_ent_coef=0.0, total_timesteps=100_000, episode_len=100, models_dir="trained_models"):
         self.algo_name = algo_name
         self.learning_rate = learning_rate
         self.batch_size = batch_size
-        self.reward_type = reward_type
         self.sac_ent_coef = sac_ent_coef
         self.ppo_ent_coef = ppo_ent_coef
 
@@ -551,13 +553,12 @@ class ModelEvaluationEnv():
         print(f"[METRICS] MAE={mae:.4f}, MSE={mse:.4f}, RMSE={rmse:.4f}, AvgReward={avg_reward:.4f}, ConvergenceRate={convergence_rate:.6f}, AvgJerk={avg_jerk:.4f}, VarianceJerk={var_jerk:.4f}")
 
         # Append results to CSV
-        fieldnames = ["Algorithm", "EpisodeLength", "LearningRate", "BatchSize", "EntCoef", "RewardType", "MAE", "MSE", "RMSE", "AvgReward", "ConvergenceRate", "AvgJerk", "VarianceJerk"]
+        fieldnames = ["Algorithm", "EpisodeLength", "LearningRate", "BatchSize", "EntCoef", "MAE", "MSE", "RMSE", "AvgReward", "ConvergenceRate", "AvgJerk", "VarianceJerk"]
         new_row = {
             "Algorithm": self.algo_name,
             "EpisodeLength": self.episode_len,
             "LearningRate": self.learning_rate,
             "BatchSize": self.batch_size,
-            "RewardType": self.reward_type,
             "EntCoef": self.ent_coef,
             "MAE": mae,
             "MSE": mse,
@@ -589,7 +590,7 @@ class ModelEvaluationEnv():
         plt.tight_layout()
 
         os.makedirs("images", exist_ok=True)
-        plt.savefig(f"images/{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_el={self.episode_len}_entcoef={self.ent_coef}_reward={self.reward_type}_timesteps={self.total_timesteps}.png")
+        plt.savefig(f"images/{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_el={self.episode_len}_entcoef={self.ent_coef}_timesteps={self.total_timesteps}.png")
 
     # ------------------------------------------------------------------------
     # Train a model
@@ -597,7 +598,7 @@ class ModelEvaluationEnv():
     def train(self):
 
         # Name of model trained with the unique set of parameters
-        self.trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_el={self.episode_len}_entcoef={self.ent_coef}_reward={self.reward_type}_timesteps={self.total_timesteps}.zip"
+        self.trained_model_name = f"{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_el={self.episode_len}_entcoef={self.ent_coef}_timesteps={self.total_timesteps}.zip"
 
         # Check if pre-trained model exists for the given set of parameters
         # If it doesn't exist, start training
@@ -624,13 +625,12 @@ class ModelEvaluationEnv():
         print(f"[INFO] Using episode_len = {self.episode_len}")
         print(f"[INFO] Using learning_rate = {self.learning_rate}")
         print(f"[INFO] Using batch_size = {self.batch_size}")
-        print(f"[INFO] Using reward_type = {self.reward_type}")
         print(f"[INFO] Using entropy coefficient = {self.ent_coef}")
         print(f"[INFO] Number of episodes: {len(self.episodes_list)} (some leftover if 1200 not divisible by {self.episode_len})")
 
         # 5B) Create the TRAIN environment
         def make_train_env():
-            return TrainEnv(self.episodes_list, delta_t=1.0, reward_type=self.reward_type)
+            return TrainEnv(self.episodes_list, delta_t=1.0)
 
         train_env = DummyVecEnv([make_train_env])
 
@@ -663,7 +663,7 @@ class ModelEvaluationEnv():
         return self.model
 
     def test(self, metrics_summary_filename):
-        test_env = TestEnv(full_speed_data, delta_t=1.0, reward_type=self.reward_type)
+        test_env = TestEnv(full_speed_data, delta_t=1.0)
 
         obs, _ = test_env.reset()
         rewards = []
@@ -740,27 +740,27 @@ class ModelEvaluationEnv():
 def task1():
     print("Task 1: Model and Hyperparameter Modifications")
 
-    timesteps = 200_000
+    timesteps = 1_000_000
 
     # ------------------------------------------------------------------------
     # Try out different batch sizes
     # ------------------------------------------------------------------------
     print("Task 1: Batch size changes")
 
-    algorithms = ["SAC", "PPO", "TD3", "DDPG"]
+    # algorithms = ["SAC", "PPO", "TD3", "DDPG"]
+    algorithms = ["PPO"]
     batch_sizes = [64, 128, 256]
     metrics_summary_filename = "metrics_summary_task1_batchsize_variation"
 
     for algo in algorithms:
         for current_batch in batch_sizes:
-
-            model_env = ModelEvaluationEnv(algo_name=algo, batch_size=current_batch, total_timesteps=timesteps) 
+            model_env = ModelEvaluationEnv(algo_name=algo, batch_size=current_batch, ppo_ent_coef=0.005, total_timesteps=timesteps) 
             model_env.train()
             model_env.test(metrics_summary_filename)
 
     plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task1_batchsize_vs_MAE", save_dir="task1_images")
-    plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task1_batchsize_vs_RMSE", save_dir="task1_images")
-    plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_batchsize_vs_ConvergenceRate", save_dir="task1_images")
+    # plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task1_batchsize_vs_RMSE", save_dir="task1_images")
+    # plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_batchsize_vs_ConvergenceRate", save_dir="task1_images")
 
     # ------------------------------------------------------------------------
     # Try out different learning rates
@@ -782,8 +782,8 @@ def task1():
             model_env.test(metrics_summary_filename)
 
     plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task1_lr_vs_MAE", save_dir="task1_images")
-    plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task1_lr_vs_RMSE", save_dir="task1_images")
-    plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_lr_vs_ConvergenceRate", save_dir="task1_images")
+    # plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task1_lr_vs_RMSE", save_dir="task1_images")
+    # plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task1_lr_vs_ConvergenceRate", save_dir="task1_images")
 
     # ------------------------------------------------------------------------
     # Get reference vs predicted for bets set of hyperparameters for each model
@@ -833,34 +833,11 @@ def task2():
     plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task2_episodelength_vs_RMSE", save_dir="task2_images")
     plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task2_episodelength_vs_ConvergenceRate", save_dir="task2_images")
 
-def task3():
-    print("Task 3: Reward Structure Adjustments")
-
-    timesteps = 100_000
-
-    # ------------------------------------------------------------------------
-    # Try out reward types lengths
-    # ------------------------------------------------------------------------
-    algorithms = ["SAC", "PPO", "DDPG", "TD3"]
-    rewards = ["abs", "squared", "exp"]
-    metrics_summary_filename = "metrics_summary_task3_reward_type_variation"
-
-    for algo in algorithms:
-        for current_reward in rewards:
-            model_env = ModelEvaluationEnv(algo_name=algo, total_timesteps=timesteps, reward_type=current_reward) 
-            model_env.train()
-            model_env.test(metrics_summary_filename)
-
-    plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task3_rewards_vs_MAE", save_dir="task3_images")
-    plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task3_rewards_vs_RMSE", save_dir="task3_images")
-    plot_rewardtype_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task3_rewards_vs_ConvergenceRate", save_dir="task3_images")
-
-def run_from_command_line(algo_name, batch_size, episode_len, learning_rate, reward_type, total_timesteps, log_dir):
+def run_from_command_line(algo_name, batch_size, episode_len, learning_rate, total_timesteps, log_dir):
 
     model_env = ModelEvaluationEnv(algo_name=algo_name, 
                                    batch_size=batch_size,
                                    learning_rate=learning_rate,
-                                   reward_type=reward_type,
                                    episode_len=episode_len,
                                    total_timesteps=total_timesteps,
                                    log_dir=log_dir
@@ -926,13 +903,6 @@ def main():
         default="cli",
         help="Select the task to run."
     )
-    parser.add_argument(
-        "--reward_type",
-        type=str,
-        default="lead_vehicle",
-        choices=["abs", "squared", "exp"],
-        help="Select the reward function type"
-    )
     args = parser.parse_args()
 
     # Create logger
@@ -943,7 +913,6 @@ def main():
     algo_name = args.algorithm
     batch_size = args.batch_size
     episode_len = args.episode_len
-    reward_type = args.reward_type
     
     learning_rate = args.learning_rate
     total_timesteps = args.timesteps
@@ -951,7 +920,7 @@ def main():
 
     # Select task to run
     if (task == "cli"):
-        run_from_command_line(algo_name, batch_size, episode_len, learning_rate, reward_type, total_timesteps, log_dir)
+        run_from_command_line(algo_name, batch_size, episode_len, learning_rate, total_timesteps, log_dir)
     elif task == "task1":
         task1()
     elif task == "task2":
