@@ -306,6 +306,13 @@ class TrainEnv(gym.Env):
 
         reward = self.compute_reward(rel_d, dv, jerk, a)
 
+        if idx_cur == 0:
+            lead_accel = 0.0
+        else:
+            lead_accel = (self.lead_speed[idx_cur] - self.lead_speed[idx_cur - 1]) / self.delta_t
+
+        acc_diff = a - lead_accel
+
         # Prepare next index and obs (avoid off-by-one)
         next_idx = idx_cur + 1
         terminated = (next_idx >= self.episode_len)
@@ -325,11 +332,13 @@ class TrainEnv(gym.Env):
             "speed_diff": dv,
             "jerk": jerk,
             "lead_speed": lead_v,
-            "lead_pos": self.lead_pos[idx_cur],   # use idx_cur, not self.step_idx after increment
+            "lead_pos": self.lead_pos[idx_cur],
             "ego_speed": self.current_speed,
             "ego_pos": self.ego_pos,
+            "ego_accel": a,
+            "lead_accel": lead_accel,
+            "acc_diff": acc_diff,
         }
-
         # advance index last
         self.step_idx = next_idx
         truncated = False
@@ -419,6 +428,14 @@ class TestEnv(gym.Env):
 
         reward = self.compute_reward(rel_d, dv, jerk, a)
 
+        # --- lead acceleration (finite difference) ---
+        if idx_cur == 0:
+            lead_accel = 0.0
+        else:
+            lead_accel = (self.lead_speed[idx_cur] - self.lead_speed[idx_cur - 1]) / self.delta_t
+
+        acc_diff = a - lead_accel
+
         # Prepare next index and obs (avoid off-by-one by clamping)
         next_idx = idx_cur + 1
         terminated = (next_idx >= self.n_steps)
@@ -436,11 +453,13 @@ class TestEnv(gym.Env):
             "speed_diff": dv,
             "jerk": jerk,
             "lead_speed": lead_v,
-            "lead_pos": self.lead_pos[idx_cur],   # <- current index, safe
+            "lead_pos": self.lead_pos[idx_cur],
             "ego_speed": self.current_speed,
             "ego_pos": self.ego_pos,
+            "ego_accel": a,
+            "lead_accel": lead_accel,
+            "acc_diff": acc_diff,
         }
-
         # advance index last
         self.idx = next_idx
         truncated = False
@@ -649,10 +668,12 @@ class ModelEvaluationEnv():
         obs, _ = test_env.reset()
         rewards = []
 
-        ego_speeds, ego_positions = [], []
-        lead_speeds, lead_positions = [], []
+        ego_accels, ego_speeds, ego_positions = [], [], []
+        lead_accels, lead_speeds, lead_positions = [], [], []
+        acc_diffs = []
         rel_distances = []
         jerks = []
+                
 
         for _ in range(DATA_LEN):
             action, _states = self.model.predict(obs, deterministic=True)
@@ -664,7 +685,12 @@ class ModelEvaluationEnv():
             lead_speeds.append(info["lead_speed"])
             lead_positions.append(info["lead_pos"])
             rel_distances.append(info["rel_distance"])
+            ego_accels.append(info["ego_accel"])
+            lead_accels.append(info["lead_accel"])
+            acc_diffs.append(info["acc_diff"])
             jerks.append(info["jerk"])
+
+
 
             if terminated or truncated:
                 break
@@ -688,7 +714,6 @@ class ModelEvaluationEnv():
         out_name = self.trained_model_name[:-4]
         data_csv = os.path.join("metrics", f"lead_vs_ego_data_{out_name}.csv")
 
-        
         pd.DataFrame({
             "lead_speed": lead_speeds,
             "ego_speed": ego_speeds,
@@ -696,13 +721,18 @@ class ModelEvaluationEnv():
             "ego_pos": ego_positions,
             "rel_distance": rel_distances,
             "jerk": jerks,
+            "ego_accel": ego_accels,
+            "lead_accel": lead_accels,
+            "acc_diff": acc_diffs,
             "reward": rewards[:len(ego_speeds)],
         }).to_csv(data_csv, index=False)
+
         print(f"[INFO] Wrote timeseries to {data_csv}")
 
         plot_lead_vs_ego(data_csv, out_name=f"{out_name}", algo=self.algo_name)
         plot_position_difference(data_csv, out_name=f"{out_name}", algo=self.algo_name)
         plot_speed_difference(data_csv, out_name=f"{out_name}", algo=self.algo_name, band=1.0)
+        plot_acceleration_difference(data_csv, out_name=f"{out_name}", algo=self.algo_name, band=MAX_ACCEL)
 
 # ------------------------------------------------------------------------
 # Declare project tasks based on assignment document

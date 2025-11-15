@@ -380,3 +380,57 @@ def plot_speed_difference(csv_path, out_name, algo=None, save_dir="images", band
 
     # if pct_in_band is not None:
     #     print(f", % within ±{band:g} m/s = {pct_in_band:.1f}%")
+
+def plot_acceleration_difference(csv_path, out_name, algo=None, save_dir="images", band=None):
+
+    os.makedirs(save_dir, exist_ok=True)
+    df = pd.read_csv(csv_path)
+
+    def pick(name, *aliases):
+        for c in (name, *aliases):
+            if c in df.columns:
+                return c
+        return None
+
+    # Either plot from ego/lead accelerations or directly from acc_diff
+    acc_diff_col = pick("acc_diff", "accel_diff", "delta_a")
+    if acc_diff_col is not None:
+        acc_diff = df[acc_diff_col].to_numpy(float)
+    else:
+        lead_accel_col = pick("lead_accel", "accel_lead")
+        ego_accel_col  = pick("ego_accel",  "accel_ego")
+        if lead_accel_col is None or ego_accel_col is None:
+            raise ValueError(
+                "CSV must contain 'acc_diff' or both 'ego_accel' and 'lead_accel' columns (or aliases)."
+            )
+        lead_accel = df[lead_accel_col].to_numpy(float)
+        ego_accel  = df[ego_accel_col].to_numpy(float)
+        acc_diff   = ego_accel - lead_accel
+
+    t = np.arange(len(acc_diff))
+
+    plt.figure(figsize=(10, 4))
+    plt.plot(t, acc_diff, label="$\Delta a$", linewidth=1.5)
+
+    pct_in_band = None
+    if band is not None and band > 0:
+        plt.fill_between(t, -band, band, alpha=0.1)
+        plt.axhline(band,  linestyle=":", linewidth=1, alpha=0.6)
+        plt.axhline(-band, linestyle=":", linewidth=1, alpha=0.6)
+        pct_in_band = 100.0 * np.mean((acc_diff >= -band) & (acc_diff <= band))
+
+    plt.xlabel("Timestep")
+    plt.ylabel("Acceleration Difference $\Delta a$ (m/s$^2$)")
+    title = f"Acceleration Difference - {algo}" if algo is not None else "Acceleration Difference"
+    plt.title(title)
+    plt.grid(alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+
+    out_path = os.path.join(save_dir, f"{out_name}_acceleration_difference.png")
+    plt.savefig(out_path, dpi=300)
+    plt.close()
+
+    print(f"[INFO] Saved acceleration difference plot: {out_path}")
+    if pct_in_band is not None:
+        print(f"[INFO] {pct_in_band:.2f}% of timesteps within ±{band} m/s² band.")
