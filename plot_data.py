@@ -9,6 +9,45 @@ from rl import MAX_DIST, MIN_DIST
 # Functions for plotting data
 # ------------------------------------------------------------------------
 
+def plot_learningrate_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(7, 4)):
+    """
+    Plot how learning_rate affects a chosen metric for each algorithm.
+    X-ticks correspond to the actual learning rates tested.
+    """
+    df = pd.read_csv(csv_path)
+    os.makedirs(save_dir, exist_ok=True)
+
+    algos = df["Algorithm"].unique()
+    algos = ["SAC", "PPO", "DDPG"]
+    colors = plt.cm.tab10.colors
+
+    plt.figure(figsize=figsize)
+    for i, algo in enumerate(algos):
+        sub = df[df["Algorithm"] == algo].copy()
+        sub = sub.groupby("LearningRate", as_index=False)[metric].mean().sort_values("LearningRate")
+        plt.plot(
+            sub["LearningRate"], sub[metric],
+            marker="o", linestyle="-", label=algo, color=colors[i % len(colors)]
+        )
+
+    # Set log scale for learning rates
+    plt.xscale("log")
+
+    # Set xticks and labels to actual learning rate values
+    lr_values = sorted(df["LearningRate"].unique())
+    plt.xticks(lr_values, [f"{v:.0e}" for v in lr_values])
+
+    plt.title(f"{metric} vs Learning Rate")
+    plt.xlabel("Learning Rate")
+    plt.ylabel(metric)
+    plt.grid(alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, f"{out_name}.png"), dpi=300)
+    plt.close()
+
+    print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
+
 def plot_batchsize_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(7, 4)):
 
     df = pd.read_csv(csv_path)
@@ -358,13 +397,6 @@ def plot_speed_difference(csv_path, out_name, algo=None, save_dir="images", band
     plt.figure(figsize=(10, 4))
     plt.plot(t, delta_v, label="$\Delta$v", linewidth=1.5)
 
-    pct_in_band = None
-    if band is not None and band > 0:
-        plt.fill_between(t, -band, band, alpha=0.1)
-        plt.axhline(band,  linestyle=":", linewidth=1, alpha=0.6)
-        plt.axhline(-band, linestyle=":", linewidth=1, alpha=0.6)
-        pct_in_band = 100.0 * np.mean((delta_v >= -band) & (delta_v <= band))
-
     plt.xlabel("Timestep")
     plt.ylabel("Speed Difference $\Delta$v (m/s)")
     plt.title(f"Speed Difference - {algo}")
@@ -377,9 +409,6 @@ def plot_speed_difference(csv_path, out_name, algo=None, save_dir="images", band
     plt.close()
 
     print(f"[INFO] Saved speed difference plot: {out_path}")
-
-    # if pct_in_band is not None:
-    #     print(f", % within ±{band:g} m/s = {pct_in_band:.1f}%")
 
 def plot_acceleration_difference(csv_path, out_name, algo=None, save_dir="images", band=None):
 
@@ -434,3 +463,55 @@ def plot_acceleration_difference(csv_path, out_name, algo=None, save_dir="images
     print(f"[INFO] Saved acceleration difference plot: {out_path}")
     if pct_in_band is not None:
         print(f"[INFO] {pct_in_band:.2f}% of timesteps within ±{band} m/s² band.")
+
+def plot_training_curve(
+    csv_path,
+    out_name,
+    save_dir="images",
+    figsize=(7, 4),
+    smooth_window=20,
+):
+
+    df = pd.read_csv(csv_path)
+
+    # Ensure sorted by timestep
+    df = df.sort_values("timestep")
+
+    timesteps = df["timestep"].values
+    episode_return = df["episode_return"].values
+
+    # Average 
+    if smooth_window > 1:
+        episode_return_smooth = (
+            pd.Series(episode_return)
+            .rolling(window=smooth_window, min_periods=1)
+            .mean()
+            .values
+        )
+    else:
+        episode_return_smooth = episode_return
+
+    os.makedirs(save_dir, exist_ok=True)
+
+    plt.figure(figsize=figsize)
+
+    if smooth_window > 1:
+        plt.plot(
+            timesteps,
+            episode_return_smooth,
+            linewidth=2.0,
+            label=f"Smoothed (window={smooth_window} episodes)",
+        )
+
+    plt.title("Training Curve: Episode Return vs Timesteps")
+    plt.xlabel("Environment steps")
+    plt.ylabel("Episode return")
+    plt.grid(alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+
+    out_path = os.path.join(save_dir, f"{out_name}_training_log.png")
+    plt.savefig(out_path, dpi=300)
+    plt.close()
+
+    print(f"[INFO] Saved training curve to {out_path}")

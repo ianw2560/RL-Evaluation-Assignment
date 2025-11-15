@@ -21,17 +21,6 @@ import csv
 # Import functions for plotting data
 from plot_data import *
 
-
-# ------------------------------------------------------------------------
-# Define number of training timesteps for each model
-# ------------------------------------------------------------------------
-timesteps = {
-    "SAC": 200_000,
-    "TD3": 200_000,
-    "PPO": 1_000_000,
-    "DDPG": 400_000,
-}
-
 # ------------------------------------------------------------------------
 # Define ego vehicle constraints
 # ------------------------------------------------------------------------
@@ -60,8 +49,8 @@ W_SPEED = 1.0
 # Jerk penalty for comfort
 W_JERK = 0.2
 
-# soft push if hugging accel limits
-W_ACC_SOFT = 0.05
+# Weight to control how closly acceleration pushes stays against the min/max values
+W_ACCEL_SOFT_PUSH = 0.05
 
 def create_lead_vechicle(num_steps, csv_file="lead_vehicle_profile.csv"):
 
@@ -185,44 +174,6 @@ def select_algo(algo_name, train_env, device, learning_rate=1e-4, batch_size=256
 
     return model
 
-def plot_learningrate_vs_metric(csv_path, out_name, metric="MAE", save_dir="images", figsize=(7, 4)):
-    """
-    Plot how learning_rate affects a chosen metric for each algorithm.
-    X-ticks correspond to the actual learning rates tested.
-    """
-    df = pd.read_csv(csv_path)
-    os.makedirs(save_dir, exist_ok=True)
-
-    algos = df["Algorithm"].unique()
-    colors = plt.cm.tab10.colors
-
-    plt.figure(figsize=figsize)
-    for i, algo in enumerate(algos):
-        sub = df[df["Algorithm"] == algo].copy()
-        sub = sub.groupby("LearningRate", as_index=False)[metric].mean().sort_values("LearningRate")
-        plt.plot(
-            sub["LearningRate"], sub[metric],
-            marker="o", linestyle="-", label=algo, color=colors[i % len(colors)]
-        )
-
-    # Set log scale for learning rates
-    plt.xscale("log")
-
-    # Set xticks and labels to actual learning rate values
-    lr_values = sorted(df["LearningRate"].unique())
-    plt.xticks(lr_values, [f"{v:.0e}" for v in lr_values])
-
-    plt.title(f"{metric} vs Learning Rate")
-    plt.xlabel("Learning Rate")
-    plt.ylabel(metric)
-    plt.grid(alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, f"{out_name}.png"), dpi=300)
-    plt.close()
-
-    print(f"[INFO] Saved plot to {save_dir}/ for metric '{metric}'")
-
 class BaseACCEnv(gym.Env):
     """
     Base class for ACC environments.
@@ -277,7 +228,7 @@ class BaseACCEnv(gym.Env):
         raise NotImplementedError
 
     # ------------------------------------------------------------------
-    # Reward function (with fixes)
+    # Reward function
     # ------------------------------------------------------------------
     def compute_reward(self, gap, speed_diff, jerk, accel):
         """
@@ -300,14 +251,9 @@ class BaseACCEnv(gym.Env):
         jerk_pen = jerk * jerk
         acc_soft_pen = max(0.0, abs(accel) - 0.8 * MAX_ACCEL) ** 2
 
-        reward = -(
-            W_DIST * dist_pen
-            + W_SPEED * speed_pen
-            + W_JERK * jerk_pen
-            + W_ACC_SOFT * acc_soft_pen
-        )
+        reward = -(W_DIST * dist_pen + W_SPEED * speed_pen + W_JERK * jerk_pen + W_ACCEL_SOFT_PUSH * acc_soft_pen)
 
-        # Optional scaling to keep magnitudes reasonable
+        # Normalization
         reward /= 1000.0
 
         return reward
@@ -494,29 +440,35 @@ class CustomLoggingCallback(BaseCallback):
         self.log_name = log_name
         self.log_path = os.path.join(log_dir, log_name)
         self.episode_rewards = []
+
         os.makedirs(log_dir, exist_ok=True)
-        with open(self.log_path, 'w', newline='') as csvfile:
+        with open(self.log_path, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(['timestep', 'average_reward'])
+            writer.writerow(["timestep", "average_reward", "episode_return"])
 
-    def _on_step(self):
+    def _on_step(self) -> bool:
         t = self.num_timesteps
-        reward = self.locals.get('rewards', [0])[-1]
-        self.episode_rewards.append(reward)
+        r = self.locals.get("rewards", [0])[-1]
+        self.episode_rewards.append(r)
 
-        if self.locals.get('dones', [False])[-1]:
-            avg_reward = np.mean(self.episode_rewards)
-            with open(self.log_path, 'a', newline='') as csvfile:
+        done = self.locals.get("dones", [False])[-1]
+        if done:
+            avg_reward = float(np.mean(self.episode_rewards))
+            episode_return = float(np.sum(self.episode_rewards))
+
+            with open(self.log_path, "a", newline="") as csvfile:
                 writer = csv.writer(csvfile)
-                writer.writerow([t, avg_reward])
+                writer.writerow([t, avg_reward, episode_return])
+
             self.logger.record("reward/average_reward", avg_reward)
+            self.logger.record("reward/episode_return", episode_return)
             self.episode_rewards.clear()
 
         return True
 
 class ModelEvaluationEnv():
 
-    def __init__(self, log_dir="logs", algo_name="SAC", learning_rate=3e-4, batch_size=256, sac_ent_coef="auto", ppo_ent_coef=0.0, total_timesteps=100_000, episode_len=100, models_dir="trained_models"):
+    def __init__(self, log_dir="logs", algo_name="SAC", learning_rate=3e-4, batch_size=256, sac_ent_coef="auto", ppo_ent_coef=0.005, total_timesteps=100_000, episode_len=100, models_dir="trained_models"):
         self.algo_name = algo_name
         self.learning_rate = learning_rate
         self.batch_size = batch_size
@@ -662,7 +614,7 @@ class ModelEvaluationEnv():
         )
         self.model.set_logger(self.logger)
 
-        callback = CustomLoggingCallback(self.log_dir)
+        callback = CustomLoggingCallback(self.log_dir, f"{self.trained_model_name[:-4]}_training_log.csv")
 
         print(f"[INFO] Start training for {self.total_timesteps} timesteps...")
         start_time = time.time()
@@ -710,8 +662,6 @@ class ModelEvaluationEnv():
             acc_diffs.append(info["acc_diff"])
             jerks.append(info["jerk"])
 
-
-
             if terminated or truncated:
                 break
 
@@ -751,8 +701,24 @@ class ModelEvaluationEnv():
 
         plot_lead_vs_ego(data_csv, out_name=f"{out_name}", algo=self.algo_name)
         plot_position_difference(data_csv, out_name=f"{out_name}", algo=self.algo_name)
-        plot_speed_difference(data_csv, out_name=f"{out_name}", algo=self.algo_name, band=1.0)
+        plot_speed_difference(data_csv, out_name=f"{out_name}", algo=self.algo_name)
         plot_acceleration_difference(data_csv, out_name=f"{out_name}", algo=self.algo_name, band=MAX_ACCEL)
+        plot_training_curve(
+            csv_path=f"logs/{out_name}_training_log.csv",
+            out_name=f"{out_name}",
+            save_dir="images",
+            smooth_window=self.episode_len,
+        )
+
+# ------------------------------------------------------------------------
+# Define number of training timesteps for each model
+# ------------------------------------------------------------------------
+timesteps = {
+    "SAC": 10_000,
+    "PPO": 50_000,
+    "TD3": 50_000,
+    "DDPG": 50_000,
+}
 
 # ------------------------------------------------------------------------
 # Declare project tasks based on assignment document
@@ -762,15 +728,27 @@ def batch_size_test():
     print(" Batch size modification (64, 128, 256) ")
     print("------------------------------------------------------------------------")
 
-    # algorithms = ["SAC", "PPO", "TD3", "DDPG"]
-    algorithms = ["TD3"]
-    # batch_sizes = [64, 128, 256]
-    batch_sizes = [128]
+    ep_len = {
+        "SAC": 50,
+        "PPO": 100,
+        "TD3": 100,
+        "DDPG": 100,
+    }
+
+    lr = {
+        "SAC": 50,
+        "PPO": 100,
+        "TD3": 100,
+        "DDPG": 100,
+    }
+
+    algorithms = ["SAC", "PPO", "TD3", "DDPG"]
+    batch_sizes = [64, 128, 256]
     metrics_summary_filename = "metrics_summary_task1_batchsize_variation"
 
     for algo in algorithms:
         for current_batch in batch_sizes:
-            model_env = ModelEvaluationEnv(algo_name=algo, batch_size=current_batch, learning_rate=1e-4, total_timesteps=timesteps[algo]) 
+            model_env = ModelEvaluationEnv(algo_name=algo, batch_size=current_batch, learning_rate=1e-4, episode_len=ep_len[algo], total_timesteps=timesteps[algo]) 
             model_env.train()
             model_env.test(metrics_summary_filename)
 
@@ -785,8 +763,8 @@ def lr_test():
     batch_size = {
         "SAC": 256,
         "PPO": 64,
-        "TD3": 256,
-        "DDPG": 256,
+        "TD3": 64,
+        "DDPG": 128,
     }
 
     ep_len = {
