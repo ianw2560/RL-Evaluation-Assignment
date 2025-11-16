@@ -1,7 +1,16 @@
-# RL Speed Following Assignment
+# Reinforcement Learning ACC Assignment
 
-This script can be run by using the following commands to run each task:
+This goal of this assignment is to implement adaptive cruise control using reinforcement learning and evaluate the results with different hyperparameters.
+This script can be run by using the commands in the following sections
+
+## Batch Size Sweep
 
 ```
-python3 ./rl.py  --task task1 && python3 ./rl.py --task task2 && python3 ./rl.py  --task task3
+python3 ./rl.py  --task task1
+```
+
+## Learning Rate Sweep
+
+```
+python3 ./rl.py  --task task1
 ```
