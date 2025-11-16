@@ -740,7 +740,7 @@ def batch_size_test():
 
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
     batch_sizes = [64, 128, 256]
-    metrics_summary_filename = "metrics_summary_task1_batchsize_variation"
+    metrics_summary_filename = "batchsize_variation_metrics"
     plots_dir = "bs_test_images"
 
     for algo in algorithms:
@@ -776,7 +776,7 @@ def lr_test():
 
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
     learning_rates = [1e-4, 3e-4, 1e-3]
-    metrics_summary_filename = "metrics_summary_task1_learningrate_variation"
+    metrics_summary_filename = "learningrate_variation_metrics"
     plots_dir = "lr_test_images"
 
     for algo in algorithms:
@@ -817,7 +817,7 @@ def ent_coef_test():
         "DDPG": 128,
     }
 
-    metrics_summary_filename = "metrics_summary_task1_ent_coefficient_variation"
+    metrics_summary_filename = "entropy_coefficient_variation_metrics"
     plots_dir = "ent_coef_test_images"
 
     # SAC
@@ -859,7 +859,7 @@ def episode_test():
 
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
     episode_lengths = [50, 100, 200]
-    metrics_summary_filename = "metrics_summary_task2_episodelength_variation"
+    metrics_summary_filename = "episodelength_variation_metrics"
     plots_dir = "episode_test_images"
 
     for algo in algorithms:
@@ -879,7 +879,7 @@ def best_params_test():
     print(" Collect data on the best parameters for each model                     ")
     print("------------------------------------------------------------------------")
 
-    metrics_summary_filename = "metrics_summary_task1_best_hyperparameters"
+    metrics_summary_filename = "best_hyperparameters_metrics"
     plots_dir = "best_test_images"
 
     # SAC
