@@ -638,7 +638,7 @@ class ModelEvaluationEnv():
 
         return self.model
 
-    def test(self, metrics_summary_filename):
+    def test(self, metrics_summary_filename, plot_save_dir="images"):
         test_env = TestEnv(full_speed_data, delta_t=1.0)
 
         obs, _ = test_env.reset()
@@ -703,14 +703,16 @@ class ModelEvaluationEnv():
 
         print(f"[INFO] Wrote timeseries to {data_csv}")
 
-        plot_lead_vs_ego(data_csv, out_name=f"{out_name}", algo=self.algo_name)
-        plot_position_difference(data_csv, out_name=f"{out_name}", algo=self.algo_name)
-        plot_speed_difference(data_csv, out_name=f"{out_name}", algo=self.algo_name)
-        plot_acceleration_difference(data_csv, out_name=f"{out_name}", algo=self.algo_name, band=MAX_ACCEL)
+        os.makedirs(plot_save_dir, exist_ok=True)
+
+        plot_lead_vs_ego(data_csv, save_dir=plot_save_dir, out_name=out_name, algo=self.algo_name)
+        plot_position_difference(data_csv, save_dir=plot_save_dir, out_name=out_name, algo=self.algo_name)
+        plot_speed_difference(data_csv, save_dir=plot_save_dir, out_name=out_name, algo=self.algo_name)
+        plot_acceleration_difference(data_csv, save_dir=plot_save_dir, out_name=out_name, algo=self.algo_name, band=MAX_ACCEL)
         plot_training_curve(
             csv_path=f"logs/{out_name}_training_log.csv",
-            out_name=f"{out_name}",
-            save_dir="images",
+            out_name=out_name,
+            save_dir=plot_save_dir,
             smooth_window=self.episode_len,
         )
 
@@ -732,7 +734,10 @@ def batch_size_test():
     print(" Batch size modification (64, 128, 256) ")
     print("------------------------------------------------------------------------")
 
-    ep_len = {
+    # ------------------------------------------------------------------------
+    # Get best values for the hyperparameters not being sweeped
+    # ------------------------------------------------------------------------
+    el = {
         "SAC": 50,
         "PPO": 100,
         "TD3": 100,
@@ -740,23 +745,24 @@ def batch_size_test():
     }
 
     lr = {
-        "SAC": 50,
-        "PPO": 100,
-        "TD3": 100,
-        "DDPG": 100,
+        "SAC": 3e-4,
+        "PPO": 3e-4,
+        "TD3": 1e-4,
+        "DDPG": 3e-4,
     }
 
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
     batch_sizes = [64, 128, 256]
     metrics_summary_filename = "metrics_summary_task1_batchsize_variation"
+    plots_dir = "bs_test_images"
 
     for algo in algorithms:
         for current_batch in batch_sizes:
-            model_env = ModelEvaluationEnv(algo_name=algo, batch_size=current_batch, learning_rate=1e-4, episode_len=ep_len[algo], total_timesteps=timesteps[algo]) 
+            model_env = ModelEvaluationEnv(algo_name=algo, batch_size=current_batch, learning_rate=lr[algo], episode_len=el[algo], total_timesteps=timesteps[algo]) 
             model_env.train()
-            model_env.test(metrics_summary_filename)
+            model_env.test(metrics_summary_filename, plots_dir)
 
-    plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task1_batchsize_vs_MAE", save_dir="task1_images")
+    plot_batchsize_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="batchsize_vs_MAE", save_dir=plots_dir)
 
 def lr_test():
 
@@ -764,14 +770,17 @@ def lr_test():
     print(" Learning rate modification (1e-4, 3e-4, 1e-3) ")
     print("------------------------------------------------------------------------")
 
-    batch_size = {
+    # ------------------------------------------------------------------------
+    # Get best values for the hyperparameters not being sweeped
+    # ------------------------------------------------------------------------
+    bs = {
         "SAC": 256,
         "PPO": 64,
         "TD3": 64,
         "DDPG": 128,
     }
 
-    ep_len = {
+    el = {
         "SAC": 50,
         "PPO": 100,
         "TD3": 100,
@@ -781,14 +790,15 @@ def lr_test():
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
     learning_rates = [1e-4, 3e-4, 1e-3]
     metrics_summary_filename = "metrics_summary_task1_learningrate_variation"
+    plots_dir = "lr_test_images"
 
     for algo in algorithms:
         for current_lr in learning_rates:
-            model_env = ModelEvaluationEnv(algo_name=algo, batch_size=batch_size[algo], episode_len=ep_len[algo], learning_rate=current_lr, total_timesteps=timesteps[algo])
+            model_env = ModelEvaluationEnv(algo_name=algo, batch_size=bs[algo], episode_len=el[algo], learning_rate=current_lr, total_timesteps=timesteps[algo])
             model_env.train()
-            model_env.test(metrics_summary_filename)
+            model_env.test(metrics_summary_filename, plots_dir)
 
-    plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task1_lr_vs_MAE", save_dir="task1_images")
+    plot_learningrate_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="lr_vs_MAE", save_dir=plots_dir)
 
 def ent_coef_test():
 
@@ -796,47 +806,85 @@ def ent_coef_test():
     print(" Entropy coefficient modification (for SAC and PPO) ")
     print("------------------------------------------------------------------------")
 
+    # ------------------------------------------------------------------------
+    # Get best values for the hyperparameters not being sweeped
+    # ------------------------------------------------------------------------
+    el = {
+        "SAC": 50,
+        "PPO": 100,
+        "TD3": 100,
+        "DDPG": 100,
+    }
+
+    lr = {
+        "SAC": 3e-4,
+        "PPO": 3e-4,
+        "TD3": 1e-4,
+        "DDPG": 3e-4,
+    }
+
+    bs = {
+        "SAC": 256,
+        "PPO": 64,
+        "TD3": 64,
+        "DDPG": 128,
+    }
+
     metrics_summary_filename = "metrics_summary_task1_ent_coefficient_variation"
+    plots_dir = "ent_coef_test_images"
 
     # SAC
     ent_coefficients = ["auto", 0.0, 0.01]
     for ent in ent_coefficients:
-        model_env = ModelEvaluationEnv(algo_name="SAC", batch_size=256, learning_rate=1e-4, episode_len=50, total_timesteps=timesteps["SAC"], sac_ent_coef=ent)
+        model_env = ModelEvaluationEnv(algo_name="SAC", batch_size=bs["SAC"], learning_rate=lr["SAC"], episode_len=el["SAC"], total_timesteps=timesteps["SAC"], sac_ent_coef=ent)
         model_env.train()
-        model_env.test(metrics_summary_filename)
+        model_env.test(metrics_summary_filename, plots_dir)
 
-    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="SAC", metric="MAE", out_name="task1_SAC_entropy_vs_MAE", save_dir="task1_images")
+    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="SAC", metric="MAE", out_name="SAC_entropy_vs_MAE", save_dir=plots_dir)
 
     # PPO
     ent_coefficients = [0.005, 0.01, 0.05]
     for ent in ent_coefficients:
-        model_env = ModelEvaluationEnv(algo_name="PPO", batch_size=64, learning_rate=3e-4, episode_len=100, total_timesteps=timesteps["PPO"], ppo_ent_coef=ent)
+        model_env = ModelEvaluationEnv(algo_name="PPO", batch_size=bs["PPO"], learning_rate=lr["PPO"], episode_len=el["PPO"], total_timesteps=timesteps["PPO"], ppo_ent_coef=ent)
         model_env.train()
-        model_env.test(metrics_summary_filename)
+        model_env.test(metrics_summary_filename, plots_dir)
 
-    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="PPO", metric="MAE", out_name="task1_PPO_entropy_vs_MAE", save_dir="task1_images")
+    plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="PPO", metric="MAE", out_name="PPO_entropy_vs_MAE", save_dir=plots_dir)
 
 def episode_test():
     print("------------------------------------------------------------------------")
     print(" Episode length modification (50, 100, 200) ")
     print("------------------------------------------------------------------------")
 
+    lr = {
+        "SAC": 3e-4,
+        "PPO": 3e-4,
+        "TD3": 1e-4,
+        "DDPG": 3e-4,
+    }
+
+    bs = {
+        "SAC": 256,
+        "PPO": 64,
+        "TD3": 64,
+        "DDPG": 128,
+    }
+
     algorithms = ["SAC", "PPO", "TD3", "DDPG"]
     episode_lengths = [50, 100, 200]
     metrics_summary_filename = "metrics_summary_task2_episodelength_variation"
+    plots_dir = "episode_test_images"
 
     for algo in algorithms:
         for length in episode_lengths:
             print("------------------------------------------------------------------------")
             print(f" Episode length modification | algo = {algo} | episode_len = {length} ")
             print("------------------------------------------------------------------------")
-            model_env = ModelEvaluationEnv(algo_name=algo, total_timesteps=timesteps[algo], episode_len=length, ppo_ent_coef=0.005, sac_ent_coef=0.01) 
+            model_env = ModelEvaluationEnv(algo_name=algo, batch_size=bs[algo], learning_rate=lr[algo], total_timesteps=timesteps[algo], episode_len=length, ppo_ent_coef=0.005, sac_ent_coef="auto") 
             model_env.train()
-            model_env.test(metrics_summary_filename)
+            model_env.test(metrics_summary_filename, plots_dir)
 
-    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="task2_episodelength_vs_MAE", save_dir="task2_images")
-    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="RMSE", out_name="task2_episodelength_vs_RMSE", save_dir="task2_images")
-    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="ConvergenceRate", out_name="task2_episodelength_vs_ConvergenceRate", save_dir="task2_images")
+    plot_episodelength_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", metric="MAE", out_name="episodelength_vs_MAE", save_dir=plots_dir)
 
 def best_params_test():
 
@@ -845,26 +893,27 @@ def best_params_test():
     print("------------------------------------------------------------------------")
 
     metrics_summary_filename = "metrics_summary_task1_best_hyperparameters"
+    plots_dir = "best_test_images"
 
     # SAC
     model_env = ModelEvaluationEnv(algo_name="SAC", learning_rate=1e-4, batch_size=256, sac_ent_coef=0.01, total_timesteps=timesteps["SAC"])
     model_env.train()
-    model_env.test(metrics_summary_filename)
+    model_env.test(metrics_summary_filename, plots_dir)
 
     # PPO
     model_env = ModelEvaluationEnv(algo_name="PPO", learning_rate=3e-4, batch_size=64, ppo_ent_coef=0.005, total_timesteps=timesteps["PPO"])
     model_env.train()
-    model_env.test(metrics_summary_filename)
+    model_env.test(metrics_summary_filename, plots_dir)
 
     # TD3
     model_env = ModelEvaluationEnv(algo_name="TD3", learning_rate=1e-4, batch_size=128, total_timesteps=timesteps["TD3"])
     model_env.train()
-    model_env.test(metrics_summary_filename)
+    model_env.test(metrics_summary_filename, plots_dir)
 
     # DDPG
     model_env = ModelEvaluationEnv(algo_name="DDPG", learning_rate=1e-4, batch_size=64, total_timesteps=timesteps["DDPG"])
     model_env.train()
-    model_env.test(metrics_summary_filename)
+    model_env.test(metrics_summary_filename, plots_dir)
 
 
 def run_from_command_line(algo_name, batch_size, episode_len, learning_rate, total_timesteps, log_dir):
