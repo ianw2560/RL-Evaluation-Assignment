@@ -52,7 +52,7 @@ W_JERK = 0.2
 # Weight to control how closly acceleration pushes stays against the min/max values
 W_ACCEL_SOFT_PUSH = 0.05
 
-def create_lead_vechicle(num_steps, csv_file="lead_vehicle_profile.csv"):
+def create_lead_vechicle(num_steps):
 
     # Generate lead vehicle speed profile
     speed = 10 + 5 * np.sin(0.02 * np.arange(num_steps)) + 2 * np.random.randn(num_steps)
@@ -231,30 +231,34 @@ class BaseACCEnv(gym.Env):
     # Reward function
     # ------------------------------------------------------------------
     def compute_reward(self, gap, speed_diff, jerk, accel):
-        """
-        Reward based on:
-
-          - distance to a target following distance (using raw signed gap)
-          - speed difference (ego vs lead)
-          - jerk (comfort)
-          - soft penalty near accel limits
-        """
-
-        # Use a target following distance in the middle of [MIN_DIST, MAX_DIST]
         target_dist = 0.5 * (MIN_DIST + MAX_DIST)
 
-        # gap is lead_pos - ego_pos (can be negative if ego is ahead)
-        dist_error = gap - target_dist
-        dist_pen = dist_error ** 2
-
-        speed_pen = speed_diff * speed_diff
-        jerk_pen = jerk * jerk
+        # penalties (same as before)
+        dist_error   = gap - target_dist
+        dist_pen     = dist_error ** 2
+        speed_pen    = speed_diff ** 2
+        jerk_pen     = jerk ** 2
         acc_soft_pen = max(0.0, abs(accel) - 0.8 * MAX_ACCEL) ** 2
 
-        reward = -(W_DIST * dist_pen + W_SPEED * speed_pen + W_JERK * jerk_pen + W_ACCEL_SOFT_PUSH * acc_soft_pen)
+        total_pen = (
+            W_DIST * dist_pen
+            + W_SPEED * speed_pen
+            + W_JERK * jerk_pen
+            + W_ACCEL_SOFT_PUSH * acc_soft_pen
+        )
 
-        # Normalization
-        reward /= 1000.0
+        # Scale penalties into a reasonable range
+        scaled_pen = total_pen / 1000.0  # tune this
+
+        # Turn it into a positive "score": best ~ 1.0, worse < 1.0
+        reward = 1.0 - scaled_pen
+
+        # Optional: clamp so terrible states don't go crazy negative
+        reward = max(reward, -5.0)
+
+        # Optional extra shaping bonus if agent is clearly doing what you want
+        if MIN_DIST <= gap <= MAX_DIST and abs(speed_diff) < 1.0:
+            reward += 0.1  # bigger and more meaningful than 0.01
 
         return reward
 
