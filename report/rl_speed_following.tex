@@ -11,16 +11,16 @@
 \usepackage{subcaption}
 \usepackage{hyperref}
 \usepackage{fancyhdr}
-\usepackage{siunitx}   % for numbers/units in tables
+\usepackage{siunitx}
 \usepackage{xcolor}
-\usepackage{listings}  % code listings (minted avoided for portability)
+\usepackage{listings}
 
 \geometry{
   a4paper,
   margin=1in
 }
 
-\title{RL Speed Following Assignment Report}
+\title{Reinforcement Learning Adaptive Cruise Control Report}
 \author{Ian Wallace}
 \date{\today}
 
@@ -28,20 +28,23 @@
 
 \maketitle
 
+\section{Introduction}
+
+For this assignment we sought to implement adaptive cruise control (ACC) using reinforcement learning. To do this, we train the follower (ego) vehicle to follow a lead vehicle.
+
 \section{Performance Metrics and Visualization}
-In order to evaluate the different models, we used a variety of different performance metrics commonly used in evaluating reinforcement learning models. Mean Absolute Error (MAE) measures the average deviation between the predicted and target values. This metric gauges the model’s overall accuracy in tracking the reference data without overemphasizing large errors. Mean Squared Error (MSE) the average squared value between the predicted and target values. This metric penalizes larger mistakes more heavily, this is makes it an effective metric for identifying instability or extremes. Root Mean Squared Error (RMSE) serves as a scale-preserving variant of MSE, expressing the error in the same units as the original variable, which makes it more interpretable when comparing performance across models or reward structures. Convergence rate measures how quickly the model converges. This helps gauge how efficiently a model can be trained. Together, these metrics quantify different aspects of model training and performance, providing multiple ways to interpret the quality of model for a given dataset or task. The formal definition for the metrics used in this paper can be found in Section \ref{sec:metric-definitions}. Additionally, we only used RMSE as opposed to using both RMSE and MSE, in order to simplify the analysis.
+In order to evaluate the different models, we used a variety of different performance metrics commonly used in evaluating reinforcement learning models. Mean Absolute Error (MAE) measures the average deviation between the predicted and target values. This metric gauges the model's overall accuracy in tracking the reference data without overemphasizing large errors. We also include the average and variance of the ego vehicle's jerk as a metric. These two values can be used to assess the comfort the passengers within the ego vehicle. Together, these metrics quantify different aspects of model training and performance, providing multiple ways to interpret the quality of model for a given dataset or task. The formal definition for the metrics used in this paper can be found in Section \ref{sec:metric-definitions}. Additionally, we only used RMSE as opposed to using both RMSE and MSE, in order to simplify the analysis.
 
 \subsection{Metric Definitions}\label{sec:metric-definitions}
 
-Given prediction values $y_i$ and references values $x_i$ from $i=\{1,\dots,n\}$:
+Given prediction values $y_i$ and references values $x_i$ from $i=\{1,\dots,n\}$ and position value $p$:
 
 \begin{align}\label{align:defs}
 \text{MAE} &= \frac{1}{n} \sum_{i=1}^n |y_i - x_i| \\
-\text{MSE} &= \frac{1}{n} \sum_{i=1}^n (y_i - x_i)^2 \\
-\text{RMSE} &= \sqrt{\text{MSE}}
+\text{Jerk: } j(t) &= \frac{d^3 p(t)}{dt^3}  \\
+\text{Average Jerk: } \bar{j} &= \frac{1}{n} \sum_{i=1}^n j_i \\
+\text{Variance of Jerk: }\sigma_j^2 &= \frac{1}{n} \sum_{i=1}^n \bigl(j_i - \bar{j}\bigr)^2
 \end{align}
-
-% \textbf{Convergence rate} is reported as the training step at which a metric (e.g., MAE) first drops below a threshold $\tau$ and stays below for $K$ successive evaluations.
 
 \section{Model and Hyperparameter Modifications}
 
@@ -55,19 +58,32 @@ In this section, we explore how different models and hyperparemeter changes effe
     \textbf{Parameter} & \textbf{Values Tested} \\
     \hline
     Learning rate & \num{1e-4}, \num{3e-4}, \num{1e-3} \\
-    Batch size    & 64, 128, 256, 512                  \\
-    Entropy coefficients (SAC)  & 0.0, 0.005, 0.01, 0.05, 0.1, auto \\
-    Entropy coefficients (PPO)  & 0.0, 0.005, 0.01, 0.05, 0.1 \\
+    Batch size    & 64, 128, 256                  \\
+    Entropy coefficients (SAC)  & auto, 0.0, 0.01 \\
+    Entropy coefficients (PPO)  & 0.005, 0.01, 0.05 \\
     \hline
   \end{tabular}
   \caption{Hyperparameters explored}
   \label{tab:hyperparemeters}
 \end{table}
 
+\subsection{Batch Size}
+
 In Figure \ref{fig:hypvsmetrics}, we compare batch size and learning to our three different metrics.
 Starting with Figure \ref{fig:hypvsmetrics}a, PPO and SAC show decreasing MAE as the learning rate increases, suggesting faster yet stable convergence. TD3 and DDPG show increasing MAE, indicating that higher learning rates destabilize these models. This contrast shows that on-policy methods benefit from slightly more aggressive learning, while off-policy algorithms require smaller step sizes for precision. Figure \ref{fig:hypvsmetrics}c, shows similar results to Figure \ref{fig:hypvsmetrics}a.
 
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=\textwidth]{../bs_test_images/batchsize_vs_MAE.png}
+  \caption{Comparison of learning vs MAE for each model.}
+  \label{fig:bs_vs_mae}
+\end{figure}
+
+\subsection{Learning Rate}
+
 In Figure \ref{fig:hypvsmetrics}b, MAE remains flat for SAC and PPO, showing little influence from batch size. However, TD3 and DDPG fluctuate when being trained with smaller batches. This emphasizes that batch-size sensitivity is primarily an issue for these models. Figure \ref{fig:hypvsmetrics}d that is the RMSE metric shows similar results. 
+
+
 
 Figure \ref{fig:hypvsmetrics}e, shows convergence rate improving across all models with an increase in learning rate. In Figure \ref{fig:hypvsmetrics}f, we see batch size compared to convergence rate. Covergence rate is erratic at smaller batch sizes for TD3 and DDPG, however, larger batches do stabilize the convergence rate. This is in contrast to SAC and PPO, which demonstrate a steady change in convergence rate across all batch sizes, showing that they are robust to batch size variation. This robustness is seen when comparing batch size to MAE and RMSE for these models as well.
 
@@ -75,203 +91,231 @@ Figure \ref{fig:hypvsmetrics}e, shows convergence rate improving across all mode
 
 \begin{figure}[h!]
   \centering
-  \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../task1_images/task1_lr_vs_MAE.png}
-    \caption*{(a) Learning rate vs MAE}
-  \end{minipage}
-  \hfill
-  \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../task1_images/task1_batchsize_vs_MAE.png}
-    \caption*{(b) Batch size vs MAE}
-  \end{minipage}
-  \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../task1_images/task1_lr_vs_RMSE.png}
-    \caption*{(c) Learning rate vs RMSE}
-  \end{minipage}
-  \hfill
-  \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../task1_images/task1_batchsize_vs_RMSE.png}
-    \caption*{(d) Batch size vs RMSE}
-  \end{minipage}
-  \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../task1_images/task1_lr_vs_ConvergenceRate.png}
-    \caption*{(e) Learning rate vs convergence rate}
-  \end{minipage}
-  \hfill
-  \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../task1_images/task1_batchsize_vs_ConvergenceRate.png}
-    \caption*{(f) Batch size vs convergence rate}
-  \end{minipage}
-  \caption{Comparison of each modified hyperparemeters vs metrics for each model.}
-  \label{fig:hypvsmetrics}
+  \includegraphics[width=\textwidth]{../lr_test_images/lr_vs_MAE.png}
+  \caption{Comparison of learning vs MAE for each model.}
+  \label{fig:lr_vs_mae}
 \end{figure}
 
+\subsection{Entropy Coefficients}
 
 In Figure \ref{fig:ent_coef_vs_mae}a we compare different entropy coefficient values vs MAE for the SAC model. MAE is lowest when the entropy coefficient is 0.0 and increases for both small nonzero and “auto” values. In Figure \ref{fig:ent_coef_vs_mae}b we compare different entropy coefficient values vs MAE for the PPO model. MAE also increases at higher entropy coefficients, peaking around 0.01, before decreasing slightly at larger values. PPO appears to perform best with little to no added entropy.
 
 \begin{figure}[h!]
   \centering
   \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../task1_images/task1_SAC_entropy_vs_MAE.png}
-    \caption*{(a) Different entropy coefficient values vs MAE for SAC model.}
+    \includegraphics[width=\textwidth]{../ent_coef_test_images/SAC_entropy_vs_MAE.png}
+    \caption*{(a) Different entropy coefficient values vs MAE for the SAC model.}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../task1_images/task1_PPO_entropy_vs_MAE.png}
-    \caption*{(b) Different entropy coefficient values vs MAE for PPO model.}
+    \includegraphics[width=\textwidth]{../ent_coef_test_images/PPO_entropy_vs_MAE.png}
+    \caption*{(b) Different entropy coefficient values vs MAE for the PPO model.}
   \end{minipage}
   \caption{Comparison of each modified hyperparemeters vs metrics for each model.}
   \label{fig:ent_coef_vs_mae}
 \end{figure}
+
+
+
+\subsection{Episode Length Variations}
+
+Here, we modify the code to train the models using different episode lengths. The different lengths we tested are 50, 100, 200, and 400. As shown in Figure \ref{fig:eps_vs_metrics}, SAC and PPO show little variation in both MAE and RMSE across different episode length values. This is in contrast to TD3 and DDPG, which appear to vary significantly across episode length values. TD3 and DDPG both perform the best at a value of 50, while DDPG performs that worst at an epsiode length of 400 and and TD3 performs worst at episode length of 100. Longer episodes yield higher convergence rates for DDPG and TD3, but this comes at the cost of larger error variability. SAC and PPO converge more smoothly, with low but steady improvement across lengths. Overall, shorter episodes favor stability, while longer ones accelerate convergence.
+
+
+% \begin{figure}[h!]
+%   \centering
+%   \begin{minipage}[b]{0.49\textwidth}
+%     \includegraphics[width=\textwidth]{../task2_images/task2_episodelength_vs_MAE.png}
+%     \caption*{(a) Episode length vs MAE}
+%   \end{minipage}
+%   \hfill
+%   \begin{minipage}[b]{0.49\textwidth}
+%     \includegraphics[width=\textwidth]{../task2_images/task2_episodelength_vs_RMSE.png}
+%     \caption*{(b) Episode length vs RMSE}
+%   \end{minipage}
+%   \hfill
+%   \begin{minipage}[b]{0.49\textwidth}
+%     \includegraphics[width=\textwidth]{../task2_images/task2_episodelength_vs_ConvergenceRate.png}
+%     \caption*{(c) Episode length vs convergence rate}
+%   \end{minipage}
+%   \caption{Comparison of episode length vs selected metrics for each model.}
+%   \label{fig:eps_vs_metrics}
+% \end{figure}
+
+\section{Best Hyperparameter Configurations}
 
 Finally, Figure \ref{fig:pred_vs_ref} shows the predicted versus reference speed for each model, where each model is trained using the best set of parameters as found in the previous hyperparemeter exploration.
 
 \begin{figure}[h!]
   \centering
   \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../images/SAC_lr=0.0003_bs=256_el=100_entcoef=auto_reward=abs_timesteps=100000.png}
-    \caption*{(a) SAC: batch size = 256, learning rate = 0.001, entropy coefficient = 0}
+    \includegraphics[width=\textwidth]{../best_test_images/SAC_lr=0.0003_bs=256_el=50_entcoef=auto_timesteps=10000_position_difference.png}
+    \caption*{(a) SAC: batch size = 256, learning rate = 0.0003, episode length = 50, entropy coefficient = auto}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.005_reward=abs_timesteps=100000.png}
-    \caption*{(b) PPO: batch size = 64, learning rate = 0.0003, entropy coefficient = 0.005}
+    \includegraphics[width=\textwidth]{../best_test_images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.005_timesteps=50000_position_difference.png}
+    \caption*{(b) PPO: batch size = 64, learning rate = 0.0003, episode length = 100, entropy coefficient = 0.005}
   \end{minipage}
   \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../images/TD3_lr=0.0001_bs=128_el=100_entcoef=None_reward=abs_timesteps=100000.png}
-    \caption*{(c) TD3: batch size = 128, learning rate = 0.0001, entropy coefficient = N/A}
+    \includegraphics[width=\textwidth]{../best_test_images/TD3_lr=0.0001_bs=256_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    \caption*{(c) TD3: batch size = 256, learning rate = 0.0001, episode length = 100, entropy coefficient = N/A}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../images/DDPG_lr=0.0001_bs=64_el=100_entcoef=None_reward=abs_timesteps=100000.png}
-    \caption*{(d) DDPG: batch size = 64, learning rate = 0.0001, entropy coefficient = N/A}
+    \includegraphics[width=\textwidth]{../best_test_images/DDPG_lr=0.0003_bs=128_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    \caption*{(d) DDPG: batch size = 128, learning rate = 0.0003, episode length = 100, entropy coefficient = N/A}
   \end{minipage}
-  \caption{Predicted vs reference speeds of the best parameter for both learning rate and batch size for each model.}
-  \label{fig:pred_vs_ref}
+  \caption{The following distance of the ego vehicle behind the lead vehicle with the best hyperparameter configuration. The desired range of 5 m to 30 m is shaded in blue.}
+  \label{fig:best_following_distance}
 \end{figure}
-
-
-\section{Episode Length Variations}
-
-Here, we modify the code to train the models using different episode lengths. The different lengths we tested are 50, 100, 200, and 400. As shown in Figure \ref{fig:eps_vs_metrics}, SAC and PPO show little variation in both MAE and RMSE across different episode length values. This is in contrast to TD3 and DDPG, which appear to vary significantly across episode length values. TD3 and DDPG both perform the best at a value of 50, while DDPG performs that worst at an epsiode length of 400 and and TD3 performs worst at episode length of 100. Longer episodes yield higher convergence rates for DDPG and TD3, but this comes at the cost of larger error variability. SAC and PPO converge more smoothly, with low but steady improvement across lengths. Overall, shorter episodes favor stability, while longer ones accelerate convergence.
-
 
 \begin{figure}[h!]
   \centering
   \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../task2_images/task2_episodelength_vs_MAE.png}
-    \caption*{(a) Episode length vs MAE}
+    \includegraphics[width=\textwidth]{../best_test_images/SAC_lr=0.0003_bs=256_el=50_entcoef=auto_timesteps=10000_speed_difference.png}
+    \caption*{(a) SAC: batch size = 256, learning rate = 0.0003, episode length = 50, entropy coefficient = auto}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../task2_images/task2_episodelength_vs_RMSE.png}
-    \caption*{(b) Episode length vs RMSE}
+    \includegraphics[width=\textwidth]{../best_test_images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.005_timesteps=50000_speed_difference.png}
+    \caption*{(b) PPO: batch size = 64, learning rate = 0.0003, episode length = 100, entropy coefficient = 0.005}
+  \end{minipage}
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../best_test_images/TD3_lr=0.0001_bs=256_el=100_entcoef=None_timesteps=50000_speed_difference.png}
+    \caption*{(c) TD3: batch size = 256, learning rate = 0.0001, episode length = 100, entropy coefficient = N/A}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
-    \includegraphics[width=\textwidth]{../task2_images/task2_episodelength_vs_ConvergenceRate.png}
-    \caption*{(c) Episode length vs convergence rate}
+    \includegraphics[width=\textwidth]{../best_test_images/DDPG_lr=0.0003_bs=128_el=100_entcoef=None_timesteps=50000_speed_difference.png}
+    \caption*{(d) DDPG: batch size = 128, learning rate = 0.0003, episode length = 100, entropy coefficient = N/A}
   \end{minipage}
-  \caption{Comparison of episode length vs selected metrics for each model.}
-  \label{fig:eps_vs_metrics}
+  \caption{The speed difference between the ego vehicle and the lead vehicle with the best hyperparameter configuration.}
+  \label{fig:best_speed_difference}
 \end{figure}
-
-\newpage
-\section{Reward Structure Analysis}
-
-We will now explore how modifying the default reward function included with the original code impacts the results.
-To do this, we added analyzed four total reward functions, including the original reward function included with the code: absolute value, squared, and exponential functions.
-
-Given an error value $x$ and a reward value $r$, the reward functions utilized in this study are defined as follows:
-
-\begin{align}
-\text{Absolute value:  } r &= -|x| \\
-\text{Squared: } r &= -(x^2) \\
-\text{Exponential: } r &= -e^{\text{min}(|x|, 10)}
-\end{align}
-
-In Figure \ref{fig:reward_vs_mae}, we compare the calculated MAE for each model across three different reward functions. For the absolute value reward function, we found that PPO and SAC performed the best, while TD3 and DDPG performed the worst. For the exponential reward function, DDPG, SAC, and TD3 performed fairly similar, with PPO being the worst as an outlier. A similar result occured for the squared reward function, however, this time it was the TD3 reward function that performed the worst.
 
 \begin{figure}[h!]
   \centering
-  \includegraphics[width=\textwidth]{../task3_images/task3_rewards_vs_MAE.png}
-  \caption{Comparison of reward fucntion vs MAE for each model.}
-  \label{fig:reward_vs_mae}
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../best_test_images/SAC_lr=0.0003_bs=256_el=50_entcoef=auto_timesteps=10000_jerks.png}
+    \caption*{(a) SAC: batch size = 256, learning rate = 0.0003, episode length = 50, entropy coefficient = auto}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../best_test_images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.005_timesteps=50000_jerks.png}
+    \caption*{(b) PPO: batch size = 64, learning rate = 0.0003, episode length = 100, entropy coefficient = 0.005}
+  \end{minipage}
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../best_test_images/TD3_lr=0.0001_bs=256_el=100_entcoef=None_timesteps=50000_jerks.png}
+    \caption*{(c) TD3: batch size = 256, learning rate = 0.0001, episode length = 100, entropy coefficient = N/A}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../best_test_images/DDPG_lr=0.0003_bs=128_el=100_entcoef=None_timesteps=50000_jerks.png}
+    \caption*{(d) DDPG: batch size = 128, learning rate = 0.0003, episode length = 100, entropy coefficient = N/A}
+  \end{minipage}
+  \caption{The jerk values of the ego vehicle for each timestep with the best hyperparameter configuration.}
+  \label{fig:best_jerks}
 \end{figure}
 
-\newpage
+\begin{figure}[h!]
+  \centering
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../best_test_images/SAC_lr=0.0003_bs=256_el=50_entcoef=auto_timesteps=10000_acceleration_difference.png}
+    \caption*{(a) SAC: batch size = 256, learning rate = 0.0003, episode length = 50, entropy coefficient = auto}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../best_test_images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.005_timesteps=50000_acceleration_difference.png}
+    \caption*{(b) PPO: batch size = 64, learning rate = 0.0003, episode length = 100, entropy coefficient = 0.005}
+  \end{minipage}
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../best_test_images/TD3_lr=0.0001_bs=256_el=100_entcoef=None_timesteps=50000_acceleration_difference.png}
+    \caption*{(c) TD3: batch size = 256, learning rate = 0.0001, episode length = 100, entropy coefficient = N/A}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../best_test_images/DDPG_lr=0.0003_bs=128_el=100_entcoef=None_timesteps=50000_acceleration_difference.png}
+    \caption*{(d) DDPG: batch size = 128, learning rate = 0.0003, episode length = 100, entropy coefficient = N/A}
+  \end{minipage}
+  \caption{The acceleration difference between the ego vehicle and the lead vehicle with the best hyperparameter configuration. The desired range of $\pm 2$ m/s$^{2}$ is shaded in blue.}
+  \label{fig:best_acceleration_difference}
+\end{figure}
+
+
 \section{Conclusion}
 
-This report compared four reinforcement learning algorithms: SAC, PPO, TD3, and DDPG. These algorithms were compared across multiple hyperparameter configurations in order to evaluate their performance in speed following. The metrics selected to analyze the different parameter confiugrations were MAE, RMSE and convergence rate. PPO and SAC consistently achieved lower error and smoother convergence, while TD3 and DDPG showed greater sensitivity to hyperparameters. On-policy methods, such as PPO and SAC, tolerated higher learning rates and smaller batch sizes, whereas off-policy methods, such as TD3 and DDPG, required more conservative parameters in order to achieve stable learning. Varying episode length revealed that PPO and SAC maintained stable performance across all episode lengths, unlike TD3 and DDPG, which exhibited greater variability. Finally, reward function exploration showed that smooth, convex rewards, such as absolute or squared, enhanced stability for stochastic methods, while the exponential reward function favored deterministic agents. The results of all of these configurations can be found in Table \ref{tab:allvalues}. Overall, PPO and SAC seemed to perform the best overall and in the most configurations.
+This report compared four reinforcement learning algorithms: SAC, PPO, TD3, and DDPG. These algorithms were compared across multiple hyperparameter configurations in order to evaluate their performance in modeling an adaptive cruise control system.
+The metrics selected to analyze the different parameter confiugrations were MAE, RMSE and convergence rate. PPO and SAC consistently achieved lower error and smoother convergence, while TD3 and DDPG showed greater sensitivity to hyperparameters. On-policy methods, such as PPO and SAC, tolerated higher learning rates and smaller batch sizes, whereas off-policy methods, such as TD3 and DDPG, required more conservative parameters in order to achieve stable learning. Varying episode length revealed that PPO and SAC maintained stable performance across all episode lengths, unlike TD3 and DDPG, which exhibited greater variability. Finally, reward function exploration showed that smooth, convex rewards, such as absolute or squared, enhanced stability for stochastic methods, while the exponential reward function favored deterministic agents. The results of all of these configurations can be found in Table \ref{tab:allvalues}. Overall, PPO and SAC seemed to perform the best overall and in the most configurations.
 
 
-\begin{table}[h!]
-\scriptsize
-\centering
-\caption{The calculated metrics for each model and all of its configurations.}
-\begin{tabular}{|lccccc|ccccc|}
-\hline
-\textbf{Algo} & \textbf{Episode} & \textbf{LR} & \textbf{Batch} & \textbf{EntCoef} & \textbf{Reward} & \textbf{MAE} & \textbf{MSE} & \textbf{RMSE} & \textbf{AvgReward} & \textbf{ConvRate} \\
-\hline
-SAC & 50  & 0.0003 & 256 & auto & abs & 2.1389 & 7.3130 & 2.7043 & -2.1389 & -0.00106 \\
-SAC & 100 & 0.0001 & 256 & auto & abs & 2.1972 & 7.6539 & 2.7666 & -2.1972 & -0.00236 \\
-SAC & 100 & 0.0003 & 64  & auto & abs & 2.1669 & 7.4093 & 2.7220 & -2.1669 & -0.00384 \\
-SAC & 100 & 0.0003 & 128 & auto & abs & 2.1300 & 7.2577 & 2.6940 & -2.1300 & -0.00039 \\
-SAC & 100 & 0.0003 & 256 & auto & abs & 2.0024 & 6.6034 & 2.5697 & -2.0024 &  0.00114 \\
-SAC & 100 & 0.0003 & 256 & auto & squared & 2.0334 & 6.4541 & 2.5405 & -6.4541 & 0.01098 \\
-SAC & 100 & 0.0003 & 256 & auto & exp & 2.8595 & 11.9614 & 3.4585 & -205.3485 & 2.98122 \\
-SAC & 100 & 0.0003 & 512 & auto & abs & 2.0429 & 6.5563 & 2.5605 & -2.0429 &  0.00149 \\
-SAC & 100 & 0.001  & 256 & 0.0  & abs & 2.4064 & 8.7507 & 2.9582 & -2.4064 &  0.01145 \\
-SAC & 100 & 0.001  & 256 & 0.005 & abs & 2.0951 & 6.8554 & 2.6183 & -2.0951 &  0.00178 \\
-SAC & 100 & 0.001  & 256 & 0.01  & abs & 2.0713 & 6.7789 & 2.6036 & -2.0713 & -0.00192 \\
-SAC & 100 & 0.001  & 256 & 0.05  & abs & 2.1015 & 6.9275 & 2.6320 & -2.1015 &  0.00028 \\
-SAC & 100 & 0.001  & 256 & 0.1   & abs & 2.0887 & 6.8657 & 2.6203 & -2.0887 & -0.00005 \\
-SAC & 200 & 0.0003 & 256 & auto & abs & 1.9750 & 6.1713 & 2.4842 & -1.9750 &  0.00236 \\
-SAC & 300 & 0.0003 & 256 & auto & abs & 2.2733 & 8.5784 & 2.9289 & -2.2733 &  0.00859 \\
-SAC & 400 & 0.0003 & 256 & auto & abs & 2.0941 & 6.8692 & 2.6209 & -2.0941 &  0.00446 \\
-PPO & 50  & 0.0003 & 256 & 0.0  & abs & 1.8022 & 5.1197 & 2.2627 & -1.8022 &  0.00313 \\
-PPO & 100 & 0.0001 & 64  & 0.0  & abs & 1.8168 & 5.1877 & 2.2776 & -1.8168 &  0.00300 \\
-PPO & 100 & 0.0003 & 64  & 0.0  & abs & 1.7820 & 4.9738 & 2.2302 & -1.7820 &  0.00233 \\
-PPO & 100 & 0.0003 & 64  & 0.005& abs & 1.7809 & 4.9722 & 2.2298 & -1.7809 &  0.00278 \\
-PPO & 100 & 0.0003 & 64  & 0.01 & abs & 2.2277 & 7.7526 & 2.7843 & -2.2277 &  0.00250 \\
-PPO & 100 & 0.0003 & 64  & 0.05 & abs & 1.9295 & 5.6995 & 2.3874 & -1.9295 &  0.00772 \\
-PPO & 100 & 0.0003 & 64  & 0.1  & abs & 1.9713 & 6.1430 & 2.4785 & -1.9713 &  0.00005 \\
-PPO & 100 & 0.0003 & 128 & 0.0  & abs & 1.7884 & 5.0149 & 2.2394 & -1.7884 &  0.00279 \\
-PPO & 100 & 0.0003 & 256 & 0.0  & abs & 1.7942 & 5.0771 & 2.2532 & -1.7942 &  0.00293 \\
-PPO & 100 & 0.0003 & 256 & 0.0  & squared & 1.8513 & 5.3592 & 2.3150 & -5.3592 & 0.00792 \\
-PPO & 100 & 0.0003 & 256 & 0.0  & exp & 7.3106 & 71.7677 & 8.4716 & -8276.3821 & 205.3172 \\
-PPO & 100 & 0.0003 & 512 & 0.0  & abs & 1.8357 & 5.3356 & 2.3099 & -1.8357 &  0.00188 \\
-PPO & 100 & 0.001  & 64  & 0.0  & abs & 1.8092 & 5.0678 & 2.2512 & -1.8092 &  0.00417 \\
-PPO & 200 & 0.0003 & 256 & 0.0  & abs & 1.7981 & 5.0876 & 2.2556 & -1.7981 &  0.00385 \\
-PPO & 300 & 0.0003 & 256 & 0.0  & abs & 1.8993 & 5.6727 & 2.3817 & -1.8993 &  0.00505 \\
-PPO & 400 & 0.0003 & 256 & 0.0  & abs & 1.7663 & 4.9330 & 2.2210 & -1.7663 &  0.00293 \\
-TD3 & 50  & 0.0003 & 256 & --   & abs & 1.9593 & 6.0739 & 2.4645 & -1.9593 &  0.00236 \\
-TD3 & 100 & 0.0001 & 128 & --   & abs & 2.3468 & 8.7055 & 2.9505 & -2.3468 & -0.00531 \\
-TD3 & 100 & 0.0001 & 256 & --   & abs & 2.0104 & 6.4646 & 2.5426 & -2.0104 &  0.00023 \\
-TD3 & 100 & 0.0003 & 64  & --   & abs & 3.4465 & 17.2291 & 4.1508 & -3.4465 &  0.02752 \\
-TD3 & 100 & 0.0003 & 128 & --   & abs & 1.9776 & 6.2656 & 2.5031 & -1.9776 & -0.00151 \\
-TD3 & 100 & 0.0003 & 256 & --   & abs & 3.7347 & 20.1441 & 4.4882 & -3.7347 &  0.02904 \\
-TD3 & 100 & 0.0003 & 256 & --   & squared & 10.0758 & 117.4554 & 10.8377 & -117.4554 & 1.26581 \\
-TD3 & 100 & 0.0003 & 256 & --   & exp & 2.0131 & 6.2277 & 2.4955 & -37.9669 & 0.13793 \\
-TD3 & 100 & 0.0003 & 512 & --   & abs & 2.1184 & 6.9741 & 2.6409 & -2.1184 & -0.00116 \\
-TD3 & 100 & 0.001  & 256 & --   & abs & 4.0393 & 23.4167 & 4.8391 & -4.0393 &  0.03577 \\
-TD3 & 200 & 0.0003 & 256 & --   & abs & 3.4396 & 17.1318 & 4.1391 & -3.4396 &  0.02645 \\
-TD3 & 300 & 0.0003 & 256 & --   & abs & 2.1052 & 7.0557 & 2.6562 & -2.1052 &  0.00500 \\
-TD3 & 400 & 0.0003 & 256 & --   & abs & 1.8633 & 5.6063 & 2.3678 & -1.8633 &  0.00218 \\
-DDPG & 50  & 0.0003 & 256 & --   & abs & 1.9910 & 6.3544 & 2.5208 & -1.9910 & -0.00303 \\
-DDPG & 100 & 0.0001 & 64  & --   & abs & 1.9684 & 6.0649 & 2.4627 & -1.9684 & -0.00103 \\
-DDPG & 100 & 0.0001 & 256 & --   & abs & 2.4399 & 9.2070 & 3.0343 & -2.4399 &  0.01510 \\
-DDPG & 100 & 0.0003 & 64  & --   & abs & 2.0697 & 6.6724 & 2.5831 & -2.0697 &  0.00552 \\
-DDPG & 100 & 0.0003 & 128 & --   & abs & 3.9719 & 22.1370 & 4.7050 & -3.9719 &  0.02876 \\
-DDPG & 100 & 0.0003 & 256 & --   & squared & 2.7376 & 11.4166 & 3.3788 & -11.4166 & 0.03244 \\
-DDPG & 100 & 0.0003 & 256 & --   & exp & 2.5308 & 9.6121 & 3.1003 & -105.1876 & 0.43810 \\
-DDPG & 100 & 0.001  & 256 & --   & abs & 2.8113 & 12.2187 & 3.4955 & -2.8113 &  0.02584 \\
-DDPG & 200 & 0.0003 & 256 & --   & abs & 2.0471 & 6.7365 & 2.5955 & -2.0471 &  0.00777 \\
-DDPG & 300 & 0.0003 & 256 & --   & abs & 3.1649 & 14.5464 & 3.8140 & -3.1649 &  0.01410 \\
-DDPG & 400 & 0.0003 & 256 & --   & abs & 5.4784 & 40.4669 & 6.3614 & -5.4784 &  0.05408 \\
-\hline
-\end{tabular}
-\label{tab:allvalues}
-\end{table}
+% \begin{table}[h!]
+% \scriptsize
+% \centering
+% \caption{The calculated metrics for each model and all of its configurations.}
+% \begin{tabular}{|lccccc|ccccc|}
+% \hline
+% \textbf{Algo} & \textbf{Episode} & \textbf{LR} & \textbf{Batch} & \textbf{EntCoef} & \textbf{Reward} & \textbf{MAE} & \textbf{MSE} & \textbf{RMSE} & \textbf{AvgReward} & \textbf{ConvRate} \\
+% \hline
+% SAC & 50  & 0.0003 & 256 & auto & abs & 2.1389 & 7.3130 & 2.7043 & -2.1389 & -0.00106 \\
+% SAC & 100 & 0.0001 & 256 & auto & abs & 2.1972 & 7.6539 & 2.7666 & -2.1972 & -0.00236 \\
+% SAC & 100 & 0.0003 & 64  & auto & abs & 2.1669 & 7.4093 & 2.7220 & -2.1669 & -0.00384 \\
+% SAC & 100 & 0.0003 & 128 & auto & abs & 2.1300 & 7.2577 & 2.6940 & -2.1300 & -0.00039 \\
+% SAC & 100 & 0.0003 & 256 & auto & abs & 2.0024 & 6.6034 & 2.5697 & -2.0024 &  0.00114 \\
+% SAC & 100 & 0.0003 & 256 & auto & squared & 2.0334 & 6.4541 & 2.5405 & -6.4541 & 0.01098 \\
+% SAC & 100 & 0.0003 & 256 & auto & exp & 2.8595 & 11.9614 & 3.4585 & -205.3485 & 2.98122 \\
+% SAC & 100 & 0.0003 & 512 & auto & abs & 2.0429 & 6.5563 & 2.5605 & -2.0429 &  0.00149 \\
+% SAC & 100 & 0.001  & 256 & 0.0  & abs & 2.4064 & 8.7507 & 2.9582 & -2.4064 &  0.01145 \\
+% SAC & 100 & 0.001  & 256 & 0.005 & abs & 2.0951 & 6.8554 & 2.6183 & -2.0951 &  0.00178 \\
+% SAC & 100 & 0.001  & 256 & 0.01  & abs & 2.0713 & 6.7789 & 2.6036 & -2.0713 & -0.00192 \\
+% SAC & 100 & 0.001  & 256 & 0.05  & abs & 2.1015 & 6.9275 & 2.6320 & -2.1015 &  0.00028 \\
+% SAC & 100 & 0.001  & 256 & 0.1   & abs & 2.0887 & 6.8657 & 2.6203 & -2.0887 & -0.00005 \\
+% SAC & 200 & 0.0003 & 256 & auto & abs & 1.9750 & 6.1713 & 2.4842 & -1.9750 &  0.00236 \\
+% SAC & 300 & 0.0003 & 256 & auto & abs & 2.2733 & 8.5784 & 2.9289 & -2.2733 &  0.00859 \\
+% SAC & 400 & 0.0003 & 256 & auto & abs & 2.0941 & 6.8692 & 2.6209 & -2.0941 &  0.00446 \\
+% PPO & 50  & 0.0003 & 256 & 0.0  & abs & 1.8022 & 5.1197 & 2.2627 & -1.8022 &  0.00313 \\
+% PPO & 100 & 0.0001 & 64  & 0.0  & abs & 1.8168 & 5.1877 & 2.2776 & -1.8168 &  0.00300 \\
+% PPO & 100 & 0.0003 & 64  & 0.0  & abs & 1.7820 & 4.9738 & 2.2302 & -1.7820 &  0.00233 \\
+% PPO & 100 & 0.0003 & 64  & 0.005& abs & 1.7809 & 4.9722 & 2.2298 & -1.7809 &  0.00278 \\
+% PPO & 100 & 0.0003 & 64  & 0.01 & abs & 2.2277 & 7.7526 & 2.7843 & -2.2277 &  0.00250 \\
+% PPO & 100 & 0.0003 & 64  & 0.05 & abs & 1.9295 & 5.6995 & 2.3874 & -1.9295 &  0.00772 \\
+% PPO & 100 & 0.0003 & 64  & 0.1  & abs & 1.9713 & 6.1430 & 2.4785 & -1.9713 &  0.00005 \\
+% PPO & 100 & 0.0003 & 128 & 0.0  & abs & 1.7884 & 5.0149 & 2.2394 & -1.7884 &  0.00279 \\
+% PPO & 100 & 0.0003 & 256 & 0.0  & abs & 1.7942 & 5.0771 & 2.2532 & -1.7942 &  0.00293 \\
+% PPO & 100 & 0.0003 & 256 & 0.0  & squared & 1.8513 & 5.3592 & 2.3150 & -5.3592 & 0.00792 \\
+% PPO & 100 & 0.0003 & 256 & 0.0  & exp & 7.3106 & 71.7677 & 8.4716 & -8276.3821 & 205.3172 \\
+% PPO & 100 & 0.0003 & 512 & 0.0  & abs & 1.8357 & 5.3356 & 2.3099 & -1.8357 &  0.00188 \\
+% PPO & 100 & 0.001  & 64  & 0.0  & abs & 1.8092 & 5.0678 & 2.2512 & -1.8092 &  0.00417 \\
+% PPO & 200 & 0.0003 & 256 & 0.0  & abs & 1.7981 & 5.0876 & 2.2556 & -1.7981 &  0.00385 \\
+% PPO & 300 & 0.0003 & 256 & 0.0  & abs & 1.8993 & 5.6727 & 2.3817 & -1.8993 &  0.00505 \\
+% PPO & 400 & 0.0003 & 256 & 0.0  & abs & 1.7663 & 4.9330 & 2.2210 & -1.7663 &  0.00293 \\
+% TD3 & 50  & 0.0003 & 256 & --   & abs & 1.9593 & 6.0739 & 2.4645 & -1.9593 &  0.00236 \\
+% TD3 & 100 & 0.0001 & 128 & --   & abs & 2.3468 & 8.7055 & 2.9505 & -2.3468 & -0.00531 \\
+% TD3 & 100 & 0.0001 & 256 & --   & abs & 2.0104 & 6.4646 & 2.5426 & -2.0104 &  0.00023 \\
+% TD3 & 100 & 0.0003 & 64  & --   & abs & 3.4465 & 17.2291 & 4.1508 & -3.4465 &  0.02752 \\
+% TD3 & 100 & 0.0003 & 128 & --   & abs & 1.9776 & 6.2656 & 2.5031 & -1.9776 & -0.00151 \\
+% TD3 & 100 & 0.0003 & 256 & --   & abs & 3.7347 & 20.1441 & 4.4882 & -3.7347 &  0.02904 \\
+% TD3 & 100 & 0.0003 & 256 & --   & squared & 10.0758 & 117.4554 & 10.8377 & -117.4554 & 1.26581 \\
+% TD3 & 100 & 0.0003 & 256 & --   & exp & 2.0131 & 6.2277 & 2.4955 & -37.9669 & 0.13793 \\
+% TD3 & 100 & 0.0003 & 512 & --   & abs & 2.1184 & 6.9741 & 2.6409 & -2.1184 & -0.00116 \\
+% TD3 & 100 & 0.001  & 256 & --   & abs & 4.0393 & 23.4167 & 4.8391 & -4.0393 &  0.03577 \\
+% TD3 & 200 & 0.0003 & 256 & --   & abs & 3.4396 & 17.1318 & 4.1391 & -3.4396 &  0.02645 \\
+% TD3 & 300 & 0.0003 & 256 & --   & abs & 2.1052 & 7.0557 & 2.6562 & -2.1052 &  0.00500 \\
+% TD3 & 400 & 0.0003 & 256 & --   & abs & 1.8633 & 5.6063 & 2.3678 & -1.8633 &  0.00218 \\
+% DDPG & 50  & 0.0003 & 256 & --   & abs & 1.9910 & 6.3544 & 2.5208 & -1.9910 & -0.00303 \\
+% DDPG & 100 & 0.0001 & 64  & --   & abs & 1.9684 & 6.0649 & 2.4627 & -1.9684 & -0.00103 \\
+% DDPG & 100 & 0.0001 & 256 & --   & abs & 2.4399 & 9.2070 & 3.0343 & -2.4399 &  0.01510 \\
+% DDPG & 100 & 0.0003 & 64  & --   & abs & 2.0697 & 6.6724 & 2.5831 & -2.0697 &  0.00552 \\
+% DDPG & 100 & 0.0003 & 128 & --   & abs & 3.9719 & 22.1370 & 4.7050 & -3.9719 &  0.02876 \\
+% DDPG & 100 & 0.0003 & 256 & --   & squared & 2.7376 & 11.4166 & 3.3788 & -11.4166 & 0.03244 \\
+% DDPG & 100 & 0.0003 & 256 & --   & exp & 2.5308 & 9.6121 & 3.1003 & -105.1876 & 0.43810 \\
+% DDPG & 100 & 0.001  & 256 & --   & abs & 2.8113 & 12.2187 & 3.4955 & -2.8113 &  0.02584 \\
+% DDPG & 200 & 0.0003 & 256 & --   & abs & 2.0471 & 6.7365 & 2.5955 & -2.0471 &  0.00777 \\
+% DDPG & 300 & 0.0003 & 256 & --   & abs & 3.1649 & 14.5464 & 3.8140 & -3.1649 &  0.01410 \\
+% DDPG & 400 & 0.0003 & 256 & --   & abs & 5.4784 & 40.4669 & 6.3614 & -5.4784 &  0.05408 \\
+% \hline
+% \end{tabular}
+% \label{tab:allvalues}
+% \end{table}
 
 \end{document}

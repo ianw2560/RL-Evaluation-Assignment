@@ -18,7 +18,6 @@ def plot_learningrate_vs_metric(csv_path, out_name, metric="MAE", save_dir="imag
     os.makedirs(save_dir, exist_ok=True)
 
     algos = df["Algorithm"].unique()
-    algos = ["SAC", "PPO", "DDPG"]
     colors = plt.cm.tab10.colors
 
     plt.figure(figsize=figsize)
@@ -272,9 +271,6 @@ def plot_lead_vs_ego(csv_path, out_name, algo, save_dir="images"):
     # jerk length might match T; if not, pad/trim to T for plotting
     if len(jerk) != T:
         jerk = np.resize(jerk, T)
-
-
-
 
     # Plot speed
     plt.figure(figsize=(10, 4))
