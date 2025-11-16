@@ -547,19 +547,6 @@ class ModelEvaluationEnv():
                 writer.writeheader()
             writer.writerow(new_row)
 
-        # Plot the entire test
-        plt.figure(figsize=(10, 5))
-        plt.plot(lead_speeds, label="Lead Speed", linestyle="--")
-        plt.plot(ego_speeds, label="Ego Speed", linestyle="-")
-        plt.xlabel("Timestep")
-        plt.ylabel("Speed (m/s)")
-        plt.title(f"Test on full 1200-step dataset (episode_len={self.episode_len})")
-        plt.legend()
-        plt.tight_layout()
-
-        os.makedirs("images", exist_ok=True)
-        plt.savefig(f"images/{self.algo_name}_lr={self.learning_rate}_bs={self.batch_size}_el={self.episode_len}_entcoef={self.ent_coef}_timesteps={self.total_timesteps}.png")
-
     # ------------------------------------------------------------------------
     # Train a model
     # ------------------------------------------------------------------------
@@ -834,7 +821,7 @@ def ent_coef_test():
     plots_dir = "ent_coef_test_images"
 
     # SAC
-    ent_coefficients = ["auto", 0.0, 0.01]
+    ent_coefficients = ["auto", 0.005, 0.075, 0.01]
     for ent in ent_coefficients:
         model_env = ModelEvaluationEnv(algo_name="SAC", batch_size=bs["SAC"], learning_rate=lr["SAC"], episode_len=el["SAC"], total_timesteps=timesteps["SAC"], sac_ent_coef=ent)
         model_env.train()
@@ -843,7 +830,7 @@ def ent_coef_test():
     plot_entropy_vs_metric(csv_path=f"metrics/{metrics_summary_filename}.csv", algo="SAC", metric="MAE", out_name="SAC_entropy_vs_MAE", save_dir=plots_dir)
 
     # PPO
-    ent_coefficients = [0.005, 0.01, 0.05]
+    ent_coefficients = [0.001, 0.0025, 0.005, 0.0075]
     for ent in ent_coefficients:
         model_env = ModelEvaluationEnv(algo_name="PPO", batch_size=bs["PPO"], learning_rate=lr["PPO"], episode_len=el["PPO"], total_timesteps=timesteps["PPO"], ppo_ent_coef=ent)
         model_env.train()
@@ -896,25 +883,31 @@ def best_params_test():
     plots_dir = "best_test_images"
 
     # SAC
-    model_env = ModelEvaluationEnv(algo_name="SAC", learning_rate=1e-4, batch_size=256, sac_ent_coef=0.01, total_timesteps=timesteps["SAC"])
+    model_env = ModelEvaluationEnv(algo_name="SAC", learning_rate=3e-4, batch_size=256, sac_ent_coef="auto", episode_len=50, total_timesteps=timesteps["SAC"])
     model_env.train()
     model_env.test(metrics_summary_filename, plots_dir)
 
     # PPO
-    model_env = ModelEvaluationEnv(algo_name="PPO", learning_rate=3e-4, batch_size=64, ppo_ent_coef=0.005, total_timesteps=timesteps["PPO"])
+    model_env = ModelEvaluationEnv(algo_name="PPO", learning_rate=3e-4, batch_size=64, ppo_ent_coef=0.005, episode_len=100, total_timesteps=timesteps["PPO"])
     model_env.train()
     model_env.test(metrics_summary_filename, plots_dir)
 
     # TD3
-    model_env = ModelEvaluationEnv(algo_name="TD3", learning_rate=1e-4, batch_size=128, total_timesteps=timesteps["TD3"])
+    model_env = ModelEvaluationEnv(algo_name="TD3", learning_rate=1e-4, batch_size=256, episode_len=100, total_timesteps=timesteps["TD3"])
     model_env.train()
     model_env.test(metrics_summary_filename, plots_dir)
 
     # DDPG
-    model_env = ModelEvaluationEnv(algo_name="DDPG", learning_rate=1e-4, batch_size=64, total_timesteps=timesteps["DDPG"])
+    model_env = ModelEvaluationEnv(algo_name="DDPG", learning_rate=3e-4, batch_size=128, episode_len=100, total_timesteps=timesteps["DDPG"])
     model_env.train()
     model_env.test(metrics_summary_filename, plots_dir)
 
+def run_all_tests():
+    batch_size_test()
+    lr_test()
+    ent_coef_test()
+    episode_test()
+    best_params_test()
 
 def run_from_command_line(algo_name, batch_size, episode_len, learning_rate, total_timesteps, log_dir):
 
@@ -984,6 +977,7 @@ def main():
         dest="task",
         type=str,
         default="cli",
+        choices=["cli", "batch_size_test", "ent_coef_test", "episode_test", "lr_test", "best_params_test", "all"],
         help="Select the task to run."
     )
     args = parser.parse_args()
@@ -1014,6 +1008,8 @@ def main():
         best_params_test()
     elif task == "episode_test":
         episode_test()
+    elif task == "all":
+        run_all_tests()
     else:
         raise ValueError("Invalid task selected!")
 
