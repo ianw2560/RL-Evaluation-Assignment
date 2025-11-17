@@ -24,33 +24,11 @@ from plot_data import *
 # ------------------------------------------------------------------------
 # Define ego vehicle constraints
 # ------------------------------------------------------------------------
-
-# Following distance constraints
 MIN_DIST = 5.0
 MAX_DIST = 30.0
-
-# Acceleration constraints
 MIN_ACCEL = -2.0
 MAX_ACCEL = 2.0
-
-# Jerk constraint
 MAX_JERK = 1.0
-
-# ------------------------------------------------------------------------
-# Define ego vehicle training weights
-# ------------------------------------------------------------------------
-
-# Distance penalty
-W_DIST = 2.0
-
-# Speed penalty
-W_SPEED = 1.0
-
-# Jerk penalty for comfort
-W_JERK = 0.2
-
-# Weight to control how closly acceleration pushes stays against the min/max values
-W_ACCEL_SOFT_PUSH = 0.05
 
 def create_lead_vechicle(num_steps):
 
@@ -175,21 +153,13 @@ def select_algo(algo_name, train_env, device, learning_rate=1e-4, batch_size=256
     return model
 
 class BaseACCEnv(gym.Env):
-    """
-    Base class for ACC environments.
-
-    Action:
-        desired ego acceleration in [MIN_ACCEL, MAX_ACCEL] (m/s^2)
-    Observation:
-        [ego_speed, lead_speed, rel_distance_clamped>=0]
-    """
 
     def __init__(self, delta_t=1.0):
         super().__init__()
 
         self.delta_t = delta_t
 
-        # Action: desired acceleration with physical limits
+        # Action space
         self.action_space = spaces.Box(
             low=MIN_ACCEL,
             high=MAX_ACCEL,
@@ -197,49 +167,51 @@ class BaseACCEnv(gym.Env):
             dtype=np.float32,
         )
 
-        # Observation: [ego_speed, lead_speed, rel_distance>=0]
+        # Observation space
         self.observation_space = spaces.Box(
             low=np.array([0.0, 0.0, 0.0], dtype=np.float32),
             high=np.array([50.0, 50.0, 200.0], dtype=np.float32),
             dtype=np.float32,
         )
 
-        # Ego state
+        # Ego vehicle state
         self.step_idx = 0
         self.current_speed = 0.0
         self.ego_pos = 0.0
         self.last_accel = 0.0
 
-        # Lead vehicle state (per episode)
-        self.lead_speed = None  # np.array
-        self.lead_pos = None    # np.array
+        # Lead vehicle state
+        self.lead_speed = None
+        self.lead_pos = None
         self.episode_len = 0
 
-    # ------------------------------------------------------------------
-    # Hooks to be implemented by subclasses
-    # ------------------------------------------------------------------
     def _reset_lead_profile(self, seed=None):
-        """
-        Subclasses must:
-            - set self.lead_speed (array shape [episode_len])
-            - set self.lead_pos   (array shape [episode_len])
-            - set self.episode_len (int)
-        """
         raise NotImplementedError
 
-    # ------------------------------------------------------------------
-    # Reward function
-    # ------------------------------------------------------------------
     def compute_reward(self, gap, speed_diff, jerk, accel):
+
+        # Distance penalty weight
+        W_DIST = 2.0
+
+        # Speed penalty weight
+        W_SPEED = 1.0
+
+        # Jerk penalty for comfort weight
+        W_JERK = 0.2
+
+        # Weight to control how closly acceleration pushes stays against the min/max values
+        W_ACCEL_SOFT_PUSH = 0.05
+
         target_dist = 0.5 * (MIN_DIST + MAX_DIST)
 
-        # penalties (same as before)
+        # Calculate penalties
         dist_error   = gap - target_dist
         dist_pen     = dist_error ** 2
         speed_pen    = speed_diff ** 2
         jerk_pen     = jerk ** 2
         acc_soft_pen = max(0.0, abs(accel) - 0.8 * MAX_ACCEL) ** 2
 
+        # Apply weights
         total_pen = (
             W_DIST * dist_pen
             + W_SPEED * speed_pen
@@ -247,24 +219,19 @@ class BaseACCEnv(gym.Env):
             + W_ACCEL_SOFT_PUSH * acc_soft_pen
         )
 
-        # Scale penalties into a reasonable range
-        scaled_pen = total_pen / 1000.0  # tune this
+        # Scale the penalty
+        scaled_penalty = total_pen / 1000.0
 
-        # Turn it into a positive "score": best ~ 1.0, worse < 1.0
-        reward = 1.0 - scaled_pen
-
-        # Optional: clamp so terrible states don't go crazy negative
+        # Calculate postive reward value with a min of -5
+        reward = 1.0 - scaled_penalty
         reward = max(reward, -5.0)
 
-        # Optional extra shaping bonus if agent is clearly doing what you want
+        # Reward bonus when within following distance and speed difference ranges
         if MIN_DIST <= gap <= MAX_DIST and abs(speed_diff) < 1.0:
-            reward += 0.1  # bigger and more meaningful than 0.01
+            reward += 0.1
 
         return reward
 
-    # ------------------------------------------------------------------
-    # Gym API
-    # ------------------------------------------------------------------
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
@@ -278,15 +245,17 @@ class BaseACCEnv(gym.Env):
         self.last_accel = 0.0
 
         # Initial observation
-        gap = self.lead_pos[0] - self.ego_pos               # raw (can be negative)
-        rel_distance = max(gap, 0.0)                         # clamped for obs
+        gap = self.lead_pos[0] - self.ego_pos
+        rel_distance = max(gap, 0.0)
         lead_speed = self.lead_speed[0]
 
         obs = np.array(
             [self.current_speed, lead_speed, rel_distance],
             dtype=np.float32,
         )
+
         info = {}
+
         return obs, info
 
     def step(self, action):
@@ -307,23 +276,23 @@ class BaseACCEnv(gym.Env):
         self.last_accel = ego_accel
 
         # --------------------------------------------------------------
-        # 2) Integrate ego dynamics
+        # 2) Integrate ego vehicle dynamics
         # --------------------------------------------------------------
         self.current_speed = max(self.current_speed + ego_accel * self.delta_t, 0.0)
         self.ego_pos += self.current_speed * self.delta_t
 
         # --------------------------------------------------------------
-        # 3) Lead / relative states at current index
+        # 3) Leadrelative states at current index
         # --------------------------------------------------------------
         idx = self.step_idx
         lead_speed = self.lead_speed[idx]
-        gap = self.lead_pos[idx] - self.ego_pos             # raw gap (can be negative)
-        rel_distance = max(gap, 0.0)                        # clamped for obs/info
+        gap = self.lead_pos[idx] - self.ego_pos
+        rel_distance = max(gap, 0.0)
         speed_diff = self.current_speed - lead_speed
 
         reward = self.compute_reward(gap, speed_diff, jerk, ego_accel)
 
-        # Lead acceleration (finite difference)
+        # Lead acceleration
         if idx == 0:
             lead_accel = 0.0
         else:
@@ -332,7 +301,7 @@ class BaseACCEnv(gym.Env):
         acc_diff = ego_accel - lead_accel
 
         # --------------------------------------------------------------
-        # 4) Next observation & termination
+        # 4) Next observation and termination
         # --------------------------------------------------------------
         next_idx = idx + 1
         terminated = next_idx >= self.episode_len
@@ -347,13 +316,11 @@ class BaseACCEnv(gym.Env):
             dtype=np.float32,
         )
 
-        # --------------------------------------------------------------
-        # 5) Info dict (before advancing index)
-        # --------------------------------------------------------------
+        # Create info dictionary
         info = {
             "speed_error": abs(speed_diff),
-            "rel_distance": rel_distance,   # clamped
-            "gap_raw": gap,                 # optional: raw signed gap
+            "rel_distance": rel_distance,
+            "gap_raw": gap,
             "speed_diff": speed_diff,
             "jerk": jerk,
             "lead_speed": lead_speed,
@@ -374,7 +341,7 @@ class BaseACCEnv(gym.Env):
         return obs, reward, terminated, truncated, info
 
 # ------------------------------------------------------------------------
-# 3A) Training Environment: picks a random chunk each reset
+# Training Environment
 # ------------------------------------------------------------------------
 class TrainEnv(BaseACCEnv):
     """
@@ -388,17 +355,17 @@ class TrainEnv(BaseACCEnv):
         super().__init__(delta_t=delta_t)
 
     def _reset_lead_profile(self, seed=None):
-        # Randomly select an episode/chunk
+        # Randomly select an episode
         episode_index = np.random.randint(0, self.num_episodes)
         self.current_episode = self.episodes_list[episode_index]
         self.episode_len = len(self.current_episode)
 
-        # Fresh lead profile for this episode (promotes generalization)
+        # Fresh lead profile for this episode
         self.lead_speed, self.lead_pos = create_lead_vechicle(self.episode_len)
 
 
 # ------------------------------------------------------------------------
-# 3B) Test Environment with same reward flexibility
+# Test Environment
 # ------------------------------------------------------------------------
 class TestEnv(BaseACCEnv):
     """
@@ -409,7 +376,7 @@ class TestEnv(BaseACCEnv):
         self.full_data = full_data
         self.n_steps = len(full_data)
 
-        # Precompute deterministic lead profile (same as before)
+        # Precompute deterministic lead profile
         rng = np.random.RandomState(42)
         t = np.arange(self.n_steps)
         noise = rng.normal(0, 0.5, size=self.n_steps)
@@ -419,21 +386,21 @@ class TestEnv(BaseACCEnv):
         for i in range(1, self.n_steps):
             lead_pos[i] = lead_pos[i - 1] + lead_speed[i - 1] * delta_t
 
-        # Store profiles; they'll be used every reset
+        # Store profiles to be used every reset
         self._lead_speed_profile = lead_speed
         self._lead_pos_profile = lead_pos
 
         super().__init__(delta_t=delta_t)
 
+    # Reuse the same deterministic profile each episode
     def _reset_lead_profile(self, seed=None):
-        # Reuse the same deterministic profile each episode
         self.lead_speed = self._lead_speed_profile
         self.lead_pos = self._lead_pos_profile
         self.episode_len = self.n_steps
 
 
 # ------------------------------------------------------------------------
-# 4) CustomLoggingCallback (optional)
+# CustomLoggingCallback
 # ------------------------------------------------------------------------
 from stable_baselines3.common.callbacks import BaseCallback
 
@@ -505,6 +472,7 @@ class ModelEvaluationEnv():
         lead = np.array(lead_speeds)
         ego = np.array(ego_speeds)
 
+        # Calculate MAE, MSE, and RMSE
         mae = mean_absolute_error(lead, ego)
         mse = mean_squared_error(lead, ego)
         rmse = np.sqrt(mse)
@@ -583,13 +551,13 @@ class ModelEvaluationEnv():
         print(f"[INFO] Using entropy coefficient = {self.ent_coef}")
         print(f"[INFO] Number of episodes: {len(self.episodes_list)} (some leftover if 1200 not divisible by {self.episode_len})")
 
-        # 5B) Create the TRAIN environment
+        # Create the train environment
         def make_train_env():
             return TrainEnv(self.episodes_list, delta_t=1.0)
 
         train_env = DummyVecEnv([make_train_env])
 
-        # 5C) Build the model (SAC with MlpPolicy)
+        # Build the model
         device = torch.device("cuda" if torch.cuda.is_available() and self.algo_name != "PPO" else "cpu")
         print(f"Training on device: {device}")
 
@@ -607,6 +575,7 @@ class ModelEvaluationEnv():
 
         callback = CustomLoggingCallback(self.log_dir, f"{self.trained_model_name[:-4]}_training_log.csv")
 
+        # Start training
         print(f"[INFO] Start training for {self.total_timesteps} timesteps...")
         start_time = time.time()
         self.model.learn(
@@ -614,10 +583,12 @@ class ModelEvaluationEnv():
             log_interval=100,
             callback=callback
         )
+
+        # Report training duration
         end_time = time.time()
         print(f"[INFO] Training finished in {end_time - start_time:.2f}s")
 
-        # 5D) Save the model
+        # Save the model
         os.makedirs(self.models_dir, exist_ok=True)
         save_path = os.path.join(self.models_dir, model_name)
         self.model.save(save_path)
@@ -669,7 +640,7 @@ class ModelEvaluationEnv():
             filename=metrics_summary_filename,
         )
 
-        # write the timeseries CSV
+        # Write the timeseries CSV
         os.makedirs("metrics", exist_ok=True)
 
         out_name = self.trained_model_name[:-4]
@@ -690,18 +661,14 @@ class ModelEvaluationEnv():
 
         print(f"[INFO] Wrote timeseries to {data_csv}")
 
+        # Plot data
         os.makedirs(plot_save_dir, exist_ok=True)
 
         plot_lead_vs_ego(data_csv, save_dir=plot_save_dir, out_name=out_name, algo=self.algo_name)
         plot_position_difference(data_csv, save_dir=plot_save_dir, out_name=out_name, algo=self.algo_name)
         plot_speed_difference(data_csv, save_dir=plot_save_dir, out_name=out_name, algo=self.algo_name)
         plot_acceleration_difference(data_csv, save_dir=plot_save_dir, out_name=out_name, algo=self.algo_name, band=MAX_ACCEL)
-        plot_training_curve(
-            csv_path=f"logs/{out_name}_training_log.csv",
-            out_name=out_name,
-            save_dir=plot_save_dir,
-            smooth_window=self.episode_len,
-        )
+        plot_training_curve(csv_path=f"logs/{out_name}_training_log.csv", out_name=out_name, save_dir=plot_save_dir, smooth_window=self.episode_len)
 
 # ------------------------------------------------------------------------
 # Define number of training timesteps for each model
@@ -864,9 +831,6 @@ def episode_test():
 
     for algo in algorithms:
         for length in episode_lengths:
-            print("------------------------------------------------------------------------")
-            print(f" Episode length modification | algo = {algo} | episode_len = {length} ")
-            print("------------------------------------------------------------------------")
             model_env = ModelEvaluationEnv(algo_name=algo, batch_size=bs[algo], learning_rate=lr[algo], total_timesteps=timesteps[algo], episode_len=length, ppo_ent_coef=0.005, sac_ent_coef="auto") 
             model_env.train()
             model_env.test(metrics_summary_filename, plots_dir)
@@ -927,7 +891,7 @@ def run_from_command_line(algo_name, batch_size, episode_len, learning_rate, tot
     model_env.test(metrics_filename)
 
 # ------------------------------------------------------------------------
-# 5) Main: user sets episode_len from command line, train, then test
+# Main: user sets episode_len from command line, train, then test
 # ------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
