@@ -30,10 +30,27 @@
 
 \section{Introduction}
 
-For this assignment we sought to implement adaptive cruise control (ACC) using reinforcement learning. To do this, we train the follower (ego) vehicle to follow a lead vehicle.
+For this assignment we sought to implement adaptive cruise control (ACC) using reinforcement learning. To do this, we train the follower (ego) vehicle to follow a lead vehicle. Additionally, the ACC system most obey the following constraints:
+
+\begin{enumerate}
+\item Follow the lead vehicle at a safe range of 5 to 30 m.
+\item Limit acceleration and deceleration within the range of $\pm$\SI{2}{\metre\per\second\squared}.
+\item Encourage smooth transitions with minimal jerk.
+\end{enumerate}
+
+We trained four different reinforcement learning models (SAC, PPO, TD3, and DDPG) and iterated over various hyperparameter values, in order to find the optimal values. Various metrics were collected to measure the performance of the models at learning an ACC task.
+
+\section{Reward Function Description}
+
+As part of implementing an ACC system, we developed a new reward function to meet the provided constraints. The reward function penalizes deviations from the target following distance at the midpoint of the 5 to 30 m  following distance range requirement. This penalty was given the largest weight.
+A secondary penalty on the squared speed difference encourages the ego vehicle to closely track the lead vehicle's speed, so that the gap between them remains stable over time. This penalty was given the second largest weight.
+Additional smaller penalties on jerk and accelerations near the physical limits discourage jerky maneuvers. This promotes a smoother ride. 
+All penalties are combined, scaled, and subtracted from a baseline reward of 1, with a lower bound at -5 to prevent extreme outliers from dominating learning.
+Finally, a small bonus is added when the vehicle is both within the safe distance range and has a small speed mismatch. This is done to reward the model when it achieves the ideal ACC behavior of maintaining a safe gap while matching the lead vehicle's speed.
 
 \section{Performance Metrics and Visualization}
-In order to evaluate the different models, we used a variety of different performance metrics commonly used in evaluating reinforcement learning models. Mean Absolute Error (MAE) measures the average deviation between the predicted and target values. This metric gauges the model's overall accuracy in tracking the reference data without overemphasizing large errors. We also include the average and variance of the ego vehicle's jerk as a metric. These two values can be used to assess the comfort the passengers within the ego vehicle. Together, these metrics quantify different aspects of model training and performance, providing multiple ways to interpret the quality of model for a given dataset or task. The formal definition for the metrics used in this paper can be found in Section \ref{sec:metric-definitions}. Additionally, we only used RMSE as opposed to using both RMSE and MSE, in order to simplify the analysis.
+
+In order to evaluate the different models, we used a variety of different performance metrics commonly used in evaluating reinforcement learning models. Mean Absolute Error (MAE) measures the average deviation between the predicted and target values. This metric gauges the model's overall accuracy in tracking the reference data without overemphasizing large errors. We also include the average and variance of the ego vehicle's jerk as a metric. These two values can be used to assess the comfort the passengers within the ego vehicle. Together, these metrics quantify different aspects of model training and performance, providing multiple ways to interpret the quality of model for a given dataset or task. The formal definition for the metrics used in this paper can be found in Section \ref{sec:metric-definitions}.
 
 \subsection{Metric Definitions}\label{sec:metric-definitions}
 
@@ -48,7 +65,7 @@ Given prediction values $y_i$ and references values $x_i$ from $i=\{1,\dots,n\}$
 
 \section{Model and Hyperparameter Modifications}
 
-In this section, we explore how different models and hyperparemeter changes effect the performance of each of the models analyzed. We tested the following models: SAC, PPO, TD3, DDPG. The hyperparemeters we chose to explore were learning rate, batch size, and entropy coeficient. We trained each model over a range of the different hyperparemeters. When modifying a given hyperparemeter, we kept the other ones at a default value. For example, when iterating over different values for the learning rate, we kept batch size at 256 and the entropy coefficient at the default value for each model (\texttt{auto} for SAC and $0.0$ for PPO). The values chosen to test for each Hyperparameter can be seen in Table \ref{tab:hyperparemeters}.
+In this section, we explore how different models and hyperparemeter changes effect the performance of each of the models analyzed. We tested the following models: SAC, PPO, TD3, DDPG. The hyperparemeters we chose to explore were learning rate, batch size, and entropy coeficient. We trained each model over a range of different values for each of the hyperparemeters. When modifying a given hyperparemeter, we kept the other ones at a default value that was found to be optimal for that model. For example, when iterating over different values for the learning rate, we kept batch size at 256, the episode length at 50, and the entropy coefficient at \texttt{auto} for SAC. The values chosen to iterate over for each hyperparameter can be seen in Table \ref{tab:hyperparemeters}.
 
 \begin{table}%[htb]
   \centering
@@ -67,104 +84,395 @@ In this section, we explore how different models and hyperparemeter changes effe
   \label{tab:hyperparemeters}
 \end{table}
 
-\subsection{Batch Size}
+\subsection{Batch Size Variation}
 
-In Figure \ref{fig:hypvsmetrics}, we compare batch size and learning to our three different metrics.
-Starting with Figure \ref{fig:hypvsmetrics}a, PPO and SAC show decreasing MAE as the learning rate increases, suggesting faster yet stable convergence. TD3 and DDPG show increasing MAE, indicating that higher learning rates destabilize these models. This contrast shows that on-policy methods benefit from slightly more aggressive learning, while off-policy algorithms require smaller step sizes for precision. Figure \ref{fig:hypvsmetrics}c, shows similar results to Figure \ref{fig:hypvsmetrics}a.
+% In Table \ref{tab:batchsize_variation}, we compare the performance of each model over different batch sizes for three different metrics.
+% Starting with Figure \ref{fig:hypvsmetrics}a, PPO and SAC show decreasing MAE as the learning rate increases, suggesting faster yet stable convergence. TD3 and DDPG show increasing MAE, indicating that higher learning rates destabilize these models. This contrast shows that on-policy methods benefit from slightly more aggressive learning, while off-policy algorithms require smaller step sizes for precision. Figure \ref{fig:hypvsmetrics}c, shows similar results to Figure \ref{fig:hypvsmetrics}a.
+
+In Table \ref{tab:batchsize_variation}, we compare the performance of each model over different batch sizes for three different metrics. A comparison of the ego vehicle following distance over different batch sizes can be seen in Figure \ref{fig:batchsize_following_distance}. For SAC, all three batch sizes learn a good ACC policy, but batch size $64$ has the lowest MAE for speed tracking at the cost of higher jerk and slightly worse distance regulation. Batch size $256$ gives a better trade-off: only a small increase in MAE, but noticeably smoother control and a following distance that stays closest to the middle of the $5$--$30$\,m range, as seen (Fig.~\ref{fig:batchsize_following_distance}). PPO works well only at batch size $64$; larger batches lead to very high MAE and an acceptable result for the following distance. TD3 performs best at batch size $256$, while DDPG is most stable at batch size $128$ and either too passive (64) or unstable (256). Overall, SAC and PPO each have a clear optimal batch size, whereas TD3 and DDPG are more sensitive to this hyperparameter.
+
+% \begin{figure}[h!]
+%   \centering
+%   \includegraphics[width=\textwidth]{../bs_test_images/batchsize_vs_MAE.png}
+%   \caption{Comparison of learning vs MAE for each model.}
+%   \label{fig:bs_vs_mae}
+% \end{figure}
+
+%--------------------------------------------------
+% Batch Size Variation Metrics
+%--------------------------------------------------
+\begin{table}[h!]
+  \centering
+  \caption{Batch Size Variation Metrics}
+  \label{tab:batchsize_variation}
+  \begin{tabular}{rrrrr}
+    \hline
+    Algorithm & BatchSize & MAE (Speed) & AvgJerk & VarianceJerk \\
+    \hline
+    SAC  &  64 & 0.3481  & 0.2666 & 0.1110 \\
+    SAC  & 128 & 0.4251  & 0.2449 & 0.1045 \\
+    SAC  & 256 & 0.3745  & 0.1775 & 0.0547 \\ \hline
+    PPO  &  64 & 0.4351  & 0.0478 & 0.0053 \\
+    PPO  & 128 & 45.0320 & 0.0309 & 0.0025 \\
+    PPO  & 256 & 129.7946 & 0.0510 & 0.0051 \\ \hline
+    TD3  &  64 & 1.1865  & 0.9077 & 0.8763 \\
+    TD3  & 128 & 1.7359  & 0.8672 & 0.8421 \\
+    TD3  & 256 & 0.6527  & 0.6283 & 0.5209 \\ \hline
+    DDPG &  64 & 12.1167 & 0.0017 & 0.0017 \\
+    DDPG & 128 & 0.3348  & 0.5355 & 0.4080 \\
+    DDPG & 256 & 2.3812  & 0.7375 & 0.7363 \\
+    \hline
+  \end{tabular}
+\end{table}
+
 
 \begin{figure}[h!]
   \centering
-  \includegraphics[width=\textwidth]{../bs_test_images/batchsize_vs_MAE.png}
-  \caption{Comparison of learning vs MAE for each model.}
-  \label{fig:bs_vs_mae}
+
+  % ---------------- Row 1: SAC ----------------
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../bs_test_images/SAC_lr=0.0003_bs=64_el=50_entcoef=auto_timesteps=10000_position_difference.png}
+    %\caption*{(a) SAC, batch size = 64}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../bs_test_images/SAC_lr=0.0003_bs=128_el=50_entcoef=auto_timesteps=10000_position_difference.png}
+    %\caption*{(b) SAC, batch size = 128}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../bs_test_images/SAC_lr=0.0003_bs=256_el=50_entcoef=auto_timesteps=10000_position_difference.png}
+    %\caption*{(c) SAC, batch size = 256}
+  \end{minipage}
+
+  % ---------------- Row 2: PPO ----------------
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../bs_test_images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.005_timesteps=50000_position_difference.png}
+    %\caption*{(d) PPO, batch size = 64}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../bs_test_images/PPO_lr=0.0003_bs=128_el=100_entcoef=0.005_timesteps=50000_position_difference.png}
+    %\caption*{(e) PPO, batch size = 128}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../bs_test_images/PPO_lr=0.0003_bs=256_el=100_entcoef=0.005_timesteps=50000_position_difference.png}
+    %\caption*{(f) PPO, batch size = 256}
+  \end{minipage}
+
+  % ---------------- Row 3: TD3 ----------------
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../bs_test_images/TD3_lr=0.0001_bs=64_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    %\caption*{(g) TD3, batch size = 64}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../bs_test_images/TD3_lr=0.0001_bs=128_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    %\caption*{(h) TD3, batch size = 128}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../bs_test_images/TD3_lr=0.0001_bs=256_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    %\caption*{(i) TD3, batch size = 256}
+  \end{minipage}
+
+  % ---------------- Row 4: DDPG ----------------
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../bs_test_images/DDPG_lr=0.0003_bs=64_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    %\caption*{(j) DDPG, batch size = 64}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../bs_test_images/DDPG_lr=0.0003_bs=128_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    %\caption*{(k) DDPG, batch size = 128}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../bs_test_images/DDPG_lr=0.0003_bs=256_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    %\caption*{(l) DDPG, batch size = 256}
+  \end{minipage}
+
+  \caption{Effect of batch size on the following distance of the ego vehicle behind the lead vehicle for each model. Rows correspond to algorithms (top to bottom: SAC, PPO, TD3, DDPG) and columns correspond to batch sizes (left to right: 64, 128, 256). The desired following distance 5 m to 30 m is shaded in blue.}
+  \label{fig:batchsize_following_distance}
 \end{figure}
 
-\subsection{Learning Rate}
+\newpage
+\subsection{Learning Rate Variation}
 
-In Figure \ref{fig:hypvsmetrics}b, MAE remains flat for SAC and PPO, showing little influence from batch size. However, TD3 and DDPG fluctuate when being trained with smaller batches. This emphasizes that batch-size sensitivity is primarily an issue for these models. Figure \ref{fig:hypvsmetrics}d that is the RMSE metric shows similar results. 
+In Table \ref{tab:learningrate_variation}, we compare the performance of each model over learning rates for three different metrics. A comparison of the ego vehicle following distance over different learning rates can be seen in Figure \ref{fig:batchsize_following_distance}. Learning rate controls how quickly each algorithm updates its parameters. For SAC, all three learning rates give similar MAE, with the best result at \SI{3e-4}, which keeps jerk moderate while achieving low error, while the worst value was \SI{1e-4}, which did not stay within the following distance bounds. PPO also works best at \SI{3e-4}, with \SI{1e-4} staying outside of the following distance and \SI{1e-3} causing the policy to collapse and the MAE skyrocketing. TD3 and DDPG are even more sensitive, as they only behave well at \SI{1e-4} and \SI{3e-4} respectively. Larger learning rates for these models  lead to runaway error. This shows that SAC and PPO tolerate more aggressive learning, whereas TD3 and DDPG require conservative step sizes to remain stable.
 
-
-
-Figure \ref{fig:hypvsmetrics}e, shows convergence rate improving across all models with an increase in learning rate. In Figure \ref{fig:hypvsmetrics}f, we see batch size compared to convergence rate. Covergence rate is erratic at smaller batch sizes for TD3 and DDPG, however, larger batches do stabilize the convergence rate. This is in contrast to SAC and PPO, which demonstrate a steady change in convergence rate across all batch sizes, showing that they are robust to batch size variation. This robustness is seen when comparing batch size to MAE and RMSE for these models as well.
-
-
+\begin{table}[h!]
+  \centering
+  \caption{Learning Rate Variation Metrics}
+  \label{tab:learningrate_variation}
+  \begin{tabular}{rrrrr}
+    \hline
+    Algorithm & LearningRate & MAE (Speed) & AvgJerk & VarianceJerk \\
+    \hline
+    SAC  & 0.0001 & 0.4394    & 0.0768 & 0.0123 \\
+    SAC  & 0.0003 & 0.3745    & 0.1775 & 0.0547 \\
+    SAC  & 0.0010 & 0.4051    & 0.1967 & 0.0857 \\
+    PPO  & 0.0001 & 0.7994    & 0.0137 & 0.0004 \\
+    PPO  & 0.0003 & 0.4351    & 0.0478 & 0.0053 \\
+    PPO  & 0.0010 & 1,187.9475 & 0.0017 & 0.0017 \\
+    TD3  & 0.0001 & 1.1865    & 0.9077 & 0.8763 \\
+    TD3  & 0.0003 & 1,187.9475 & 0.0017 & 0.0017 \\
+    TD3  & 0.0010 & 12.1167   & 0.0017 & 0.0017 \\
+    DDPG & 0.0001 & 8.0522    & 0.2031 & 0.1808 \\
+    DDPG & 0.0003 & 0.3348    & 0.5355 & 0.4080 \\
+    DDPG & 0.0010 & 12.1167   & 0.0017 & 0.0017 \\
+    \hline
+  \end{tabular}
+\end{table}
 
 \begin{figure}[h!]
   \centering
-  \includegraphics[width=\textwidth]{../lr_test_images/lr_vs_MAE.png}
-  \caption{Comparison of learning vs MAE for each model.}
-  \label{fig:lr_vs_mae}
+
+  % ---------------- Row 1: SAC ----------------
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../lr_test_images/SAC_lr=0.0001_bs=256_el=50_entcoef=auto_timesteps=10000_position_difference.png}
+    %\caption*{(a) SAC, batch size = 64}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../lr_test_images/SAC_lr=0.0003_bs=256_el=50_entcoef=auto_timesteps=10000_position_difference.png}
+    %\caption*{(b) SAC, batch size = 128}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../lr_test_images/SAC_lr=0.001_bs=256_el=50_entcoef=auto_timesteps=10000_position_difference.png}
+    %\caption*{(c) SAC, batch size = 256}
+  \end{minipage}
+
+  % ---------------- Row 2: PPO ----------------
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../lr_test_images/PPO_lr=0.0001_bs=64_el=100_entcoef=0.005_timesteps=50000_position_difference.png}
+    %\caption*{(d) PPO, batch size = 64}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../lr_test_images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.005_timesteps=50000_position_difference.png}
+    %\caption*{(e) PPO, batch size = 128}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../lr_test_images/PPO_lr=0.001_bs=64_el=100_entcoef=0.005_timesteps=50000_position_difference.png}
+    %\caption*{(f) PPO, batch size = 256}
+  \end{minipage}
+
+  % ---------------- Row 3: TD3 ----------------
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../lr_test_images/TD3_lr=0.0001_bs=64_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    %\caption*{(g) TD3, batch size = 64}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../lr_test_images/TD3_lr=0.0003_bs=64_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    %\caption*{(h) TD3, batch size = 128}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../lr_test_images/TD3_lr=0.001_bs=64_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    %\caption*{(i) TD3, batch size = 256}
+  \end{minipage}
+
+  % ---------------- Row 4: DDPG ----------------
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../lr_test_images/DDPG_lr=0.0001_bs=128_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    %\caption*{(j) DDPG, batch size = 64}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../lr_test_images/DDPG_lr=0.0003_bs=128_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    %\caption*{(k) DDPG, batch size = 128}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../lr_test_images/DDPG_lr=0.001_bs=128_el=100_entcoef=None_timesteps=50000_position_difference.png}
+    %\caption*{(l) DDPG, batch size = 256}
+  \end{minipage}
+
+  \caption{Effect of learning rate on the following distance of the ego vehicle behind the lead vehicle for each model. Rows correspond to algorithms (top to bottom: SAC, PPO, TD3, DDPG) and columns correspond to learning rates (left to right: \SI{1e-4}, \SI{3e-4}, \SI{1e-3}). The desired following distance of 5 m to 30 m is shaded in blue.}
+  \label{fig:learningrate_following_distance}
 \end{figure}
 
-\subsection{Entropy Coefficients}
+\newpage
+\subsection{Entropy Coefficient Variation}
 
-In Figure \ref{fig:ent_coef_vs_mae}a we compare different entropy coefficient values vs MAE for the SAC model. MAE is lowest when the entropy coefficient is 0.0 and increases for both small nonzero and “auto” values. In Figure \ref{fig:ent_coef_vs_mae}b we compare different entropy coefficient values vs MAE for the PPO model. MAE also increases at higher entropy coefficients, peaking around 0.01, before decreasing slightly at larger values. PPO appears to perform best with little to no added entropy.
+Entropy regularization determines how stochastic the policies remain during training. In Table \ref{tab:entropy_variation}, we compare the performance of SAC and PPO for different entropy coefficients across three different metrics. Figure \ref{fig:ent_coef_vs_mae} shows the difference in the MAE value for speed. For SAC, the automatically tuned entropy coefficient (\texttt{auto}) clearly performs best, giving the lowest MAE and the smoothest behavior. Changing the entropy coefficient to any of the other tested values increases both error and jerk, with the worst performance at $0.01$. PPO prefers a small but non-zero entropy: coefficients of $0.0025$ and $0.005$ yield good MAE and low jerk, while too little or too much entropy ($0.001$ or $0.0075$) causes the policy to stop tracking the lead vehicle altogether, resulting in very large MAE but almost zero jerk. Overall, both SAC and PPO need entropy in a narrow range, wit SAC benefitting from the automatic entropy coefficient.
+
+\begin{table}[h!]
+  \centering
+  \caption{Entropy Coefficient Variation Metrics}
+  \label{tab:entropy_variation}
+  \begin{tabular}{rrrrr}
+    \hline
+    Algorithm & EntCoef & MAE (Speed) & AvgJerk & VarianceJerk \\
+    \hline
+    SAC & auto  & 0.3745  & 0.1775 & 0.0547 \\
+    SAC & 0.005 & 0.4323  & 0.6929 & 0.5906 \\
+    SAC & 0.075 & 0.5716  & 0.7251 & 0.6334 \\
+    SAC & 0.01  & 1.4831  & 0.9110 & 0.8831 \\
+    PPO & 0.001 & 12.1167 & 0.0017 & 0.0004 \\
+    PPO & 0.0025& 0.4457  & 0.0368 & 0.0039 \\
+    PPO & 0.005 & 0.4351  & 0.0478 & 0.0053 \\
+    PPO & 0.0075& 12.1105 & 0.0037 & 0.0031 \\
+    \hline
+  \end{tabular}
+\end{table}
 
 \begin{figure}[h!]
   \centering
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../ent_coef_test_images/SAC_entropy_vs_MAE.png}
-    \caption*{(a) Different entropy coefficient values vs MAE for the SAC model.}
+    \caption*{(a) Different entropy coefficient values vs MAE (Speed) for the SAC model.}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../ent_coef_test_images/PPO_entropy_vs_MAE.png}
-    \caption*{(b) Different entropy coefficient values vs MAE for the PPO model.}
+    \caption*{(b) Different entropy coefficient values vs MAE (Speed) for the PPO model.}
   \end{minipage}
-  \caption{Comparison of each modified hyperparemeters vs metrics for each model.}
+  \caption{Comparison of different entropy coefficient values vs MAE (Speed) for SAC and PPO.}
   \label{fig:ent_coef_vs_mae}
 \end{figure}
 
+\newpage
+\subsection{Episode Length Variation}
 
-
-\subsection{Episode Length Variations}
-
-Here, we modify the code to train the models using different episode lengths. The different lengths we tested are 50, 100, 200, and 400. As shown in Figure \ref{fig:eps_vs_metrics}, SAC and PPO show little variation in both MAE and RMSE across different episode length values. This is in contrast to TD3 and DDPG, which appear to vary significantly across episode length values. TD3 and DDPG both perform the best at a value of 50, while DDPG performs that worst at an epsiode length of 400 and and TD3 performs worst at episode length of 100. Longer episodes yield higher convergence rates for DDPG and TD3, but this comes at the cost of larger error variability. SAC and PPO converge more smoothly, with low but steady improvement across lengths. Overall, shorter episodes favor stability, while longer ones accelerate convergence.
+Here, we modify the code to train the models using different episode lengths. In Table \ref{tab:episodelength_variation}, we compare the performance of each model over learning rates for three different metrics. A comparison of the ego vehicle following distance over different learning rates can be seen in Figure \ref{fig:episodelength_following_distance}. SAC is almost unaffected by different episode lengths. For values of 50, 100, and 200 steps the following distances stay relatively inside the range, with a length 50 showing the best results. PPO tracks reasonably well for 50 and 100 steps but breaks down at 200 steps, where the following distance diverges and aligns with the very large MAE. TD3 has the only viable results with an episode length of 100, with values of 50 and 200 staying too far away from the lead vehicle. DDPG behaves best at 100 steps. The results at an episode length of 50 give very noisy, high-amplitude oscillations, and the results with an episode length of 200 lead to divergence with a large MAE.
 
 
 % \begin{figure}[h!]
 %   \centering
-%   \begin{minipage}[b]{0.49\textwidth}
-%     \includegraphics[width=\textwidth]{../task2_images/task2_episodelength_vs_MAE.png}
-%     \caption*{(a) Episode length vs MAE}
-%   \end{minipage}
-%   \hfill
-%   \begin{minipage}[b]{0.49\textwidth}
-%     \includegraphics[width=\textwidth]{../task2_images/task2_episodelength_vs_RMSE.png}
-%     \caption*{(b) Episode length vs RMSE}
-%   \end{minipage}
-%   \hfill
-%   \begin{minipage}[b]{0.49\textwidth}
-%     \includegraphics[width=\textwidth]{../task2_images/task2_episodelength_vs_ConvergenceRate.png}
-%     \caption*{(c) Episode length vs convergence rate}
-%   \end{minipage}
-%   \caption{Comparison of episode length vs selected metrics for each model.}
-%   \label{fig:eps_vs_metrics}
+%   \includegraphics[width=\textwidth]{../episode_test_images/episodelength_vs_MAE.png}
+%   \caption{Comparison of episode length vs MAE for each model.}
+%   \label{fig:el_vs_mae}
 % \end{figure}
 
-\section{Best Hyperparameter Configurations}
+\begin{table}[h!]
+  \centering
+  \caption{Episode Length Variation Metrics}
+  \label{tab:episodelength_variation}
+  \begin{tabular}{rrrrr}
+    \hline
+    Algorithm & EpisodeLength & MAE (Speed) & AvgJerk & VarianceJerk \\
+    \hline
+    SAC  &  50 & 0.3745    & 0.1775 & 0.0547 \\
+    SAC  & 100 & 0.3453    & 0.2788 & 0.1305 \\
+    SAC  & 200 & 0.3228    & 0.3684 & 0.2135 \\
+    PPO  &  50 & 0.4715    & 0.0271 & 0.0031 \\
+    PPO  & 100 & 0.4351    & 0.0478 & 0.0053 \\
+    PPO  & 200 & 1,150.4203 & 0.0037 & 0.0011 \\
+    TD3  &  50 & 0.4921    & 0.7320 & 0.6364 \\
+    TD3  & 100 & 1.1865    & 0.9077 & 0.8763 \\
+    TD3  & 200 & 1.5768    & 0.9322 & 0.9155 \\
+    DDPG &  50 & 2.2078    & 0.7983 & 0.7981 \\
+    DDPG & 100 & 0.3348    & 0.5355 & 0.4080 \\
+    DDPG & 200 & 1,187.9475 & 0.0017 & 0.0017 \\
+    \hline
+  \end{tabular}
+\end{table}
 
-Finally, Figure \ref{fig:pred_vs_ref} shows the predicted versus reference speed for each model, where each model is trained using the best set of parameters as found in the previous hyperparemeter exploration.
+\begin{figure}[h!]
+  \centering
+
+  % ---------------- Row 1: SAC ----------------
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../episode_test_images/SAC_lr=0.0003_bs=256_el=50_entcoef=auto_timesteps=10000_position_difference.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../episode_test_images/SAC_lr=0.0003_bs=256_el=100_entcoef=auto_timesteps=10000_position_difference.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../episode_test_images/SAC_lr=0.0003_bs=256_el=200_entcoef=auto_timesteps=10000_position_difference.png}
+  \end{minipage}
+
+  % ---------------- Row 2: PPO ----------------
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../episode_test_images/PPO_lr=0.0003_bs=64_el=50_entcoef=0.005_timesteps=50000_position_difference.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../episode_test_images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.005_timesteps=50000_position_difference.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../episode_test_images/PPO_lr=0.0003_bs=64_el=200_entcoef=0.005_timesteps=50000_position_difference.png}
+  \end{minipage}
+
+  % ---------------- Row 3: TD3 ----------------
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../episode_test_images/TD3_lr=0.0001_bs=64_el=50_entcoef=None_timesteps=50000_position_difference.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../episode_test_images/TD3_lr=0.0001_bs=64_el=100_entcoef=None_timesteps=50000_position_difference.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../episode_test_images/TD3_lr=0.0001_bs=64_el=200_entcoef=None_timesteps=50000_position_difference.png}
+  \end{minipage}
+
+  % ---------------- Row 4: DDPG ----------------
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../episode_test_images/DDPG_lr=0.0003_bs=128_el=50_entcoef=None_timesteps=50000_position_difference.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../episode_test_images/DDPG_lr=0.0003_bs=128_el=100_entcoef=None_timesteps=50000_position_difference.png}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{../episode_test_images/DDPG_lr=0.0003_bs=128_el=200_entcoef=None_timesteps=50000_position_difference.png}
+  \end{minipage}
+
+  \caption{Effect of episode length on the following distance of the ego vehicle behind the lead vehicle for each model. Rows correspond to algorithms (top to bottom: SAC, PPO, TD3, DDPG) and columns correspond to episode lengths (left to right: 50, 100, 200). The desired following distance of 5 m to 30 m is shaded in blue.}
+  \label{fig:episodelength_following_distance}
+\end{figure}
+
+\newpage
+\subsection{Best Hyperparameter Configurations}
+
+In this section, we selected one "best" configuration for each model. The performance of each model for each of these hyperparameter configurations, for three different metrics, can be seen in Table \ref{tab:best_hyperparams_metrics}. Under these hyperparameter configurations, SAC seems  to achieve the best overall balance. It keeps the following distance within the 5 to 30 m range and maintains a small speed difference, with moderate jerk. PPO produces the smoothest ride, with the lowest jerk and acceleration variance, but has a slightly higher MAE than SAC. TD3 and DDPG can reach acceptable MAE in their best configurations, but their distance and acceleration plots show larger oscillations and more frequent approaches to the acceleration limits. The jerk plots for TD3 and DDPG also show far more variance than the other two models, varying from the maximum to the minimum of the range of 1, as seen in Figure \ref{fig:best_jerks}. Overall, when it comes to selecting which model would work best to implement an ACC system, SAC offers the best tracking, while PPO offers the best comfort. Additionally, all four models were able to keep acceleration within the $\pm 2$ range requirement, as shown in Figure \ref{fig:best_acceleration_difference}.
+
+\begin{table}[h!]
+  \centering
+  \caption{Best Hyperparameters Metrics}
+  \label{tab:best_hyperparams_metrics}
+  \begin{tabular}{rrrrr}
+    \hline
+    Algorithm & MAE (Speed) & AvgJerk & VarianceJerk \\
+    \hline
+    SAC  & 0.3745 & 0.1775 & 0.0547 \\
+    PPO  & 0.4351 & 0.0478 & 0.0053 \\
+    TD3  & 0.6527 & 0.6283 & 0.5209 \\
+    DDPG & 0.3348 & 0.5355 & 0.4080 \\
+    \hline
+  \end{tabular}
+\end{table}
 
 \begin{figure}[h!]
   \centering
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/SAC_lr=0.0003_bs=256_el=50_entcoef=auto_timesteps=10000_position_difference.png}
-    \caption*{(a) SAC: batch size = 256, learning rate = 0.0003, episode length = 50, entropy coefficient = auto}
+    %\caption*{(a) SAC}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.005_timesteps=50000_position_difference.png}
-    \caption*{(b) PPO: batch size = 64, learning rate = 0.0003, episode length = 100, entropy coefficient = 0.005}
+    %\caption*{(b) PPO}
   \end{minipage}
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/TD3_lr=0.0001_bs=256_el=100_entcoef=None_timesteps=50000_position_difference.png}
-    \caption*{(c) TD3: batch size = 256, learning rate = 0.0001, episode length = 100, entropy coefficient = N/A}
+    %\caption*{(c) TD3}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/DDPG_lr=0.0003_bs=128_el=100_entcoef=None_timesteps=50000_position_difference.png}
-    \caption*{(d) DDPG: batch size = 128, learning rate = 0.0003, episode length = 100, entropy coefficient = N/A}
+    %\caption*{(d) DDPG}
   \end{minipage}
   \caption{The following distance of the ego vehicle behind the lead vehicle with the best hyperparameter configuration. The desired range of 5 m to 30 m is shaded in blue.}
   \label{fig:best_following_distance}
@@ -174,21 +482,21 @@ Finally, Figure \ref{fig:pred_vs_ref} shows the predicted versus reference speed
   \centering
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/SAC_lr=0.0003_bs=256_el=50_entcoef=auto_timesteps=10000_speed_difference.png}
-    \caption*{(a) SAC: batch size = 256, learning rate = 0.0003, episode length = 50, entropy coefficient = auto}
+    %\caption*{(a) SAC}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.005_timesteps=50000_speed_difference.png}
-    \caption*{(b) PPO: batch size = 64, learning rate = 0.0003, episode length = 100, entropy coefficient = 0.005}
+   % \caption*{(b) PPO}
   \end{minipage}
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/TD3_lr=0.0001_bs=256_el=100_entcoef=None_timesteps=50000_speed_difference.png}
-    \caption*{(c) TD3: batch size = 256, learning rate = 0.0001, episode length = 100, entropy coefficient = N/A}
+    %\caption*{(c) TD3}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/DDPG_lr=0.0003_bs=128_el=100_entcoef=None_timesteps=50000_speed_difference.png}
-    \caption*{(d) DDPG: batch size = 128, learning rate = 0.0003, episode length = 100, entropy coefficient = N/A}
+    %\caption*{(d) DDPG}
   \end{minipage}
   \caption{The speed difference between the ego vehicle and the lead vehicle with the best hyperparameter configuration.}
   \label{fig:best_speed_difference}
@@ -198,21 +506,21 @@ Finally, Figure \ref{fig:pred_vs_ref} shows the predicted versus reference speed
   \centering
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/SAC_lr=0.0003_bs=256_el=50_entcoef=auto_timesteps=10000_jerks.png}
-    \caption*{(a) SAC: batch size = 256, learning rate = 0.0003, episode length = 50, entropy coefficient = auto}
+    \caption*{(a) SAC}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.005_timesteps=50000_jerks.png}
-    \caption*{(b) PPO: batch size = 64, learning rate = 0.0003, episode length = 100, entropy coefficient = 0.005}
+    \caption*{(b) PPO}
   \end{minipage}
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/TD3_lr=0.0001_bs=256_el=100_entcoef=None_timesteps=50000_jerks.png}
-    \caption*{(c) TD3: batch size = 256, learning rate = 0.0001, episode length = 100, entropy coefficient = N/A}
+    \caption*{(c) TD3}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/DDPG_lr=0.0003_bs=128_el=100_entcoef=None_timesteps=50000_jerks.png}
-    \caption*{(d) DDPG: batch size = 128, learning rate = 0.0003, episode length = 100, entropy coefficient = N/A}
+    \caption*{(d) DDPG}
   \end{minipage}
   \caption{The jerk values of the ego vehicle for each timestep with the best hyperparameter configuration.}
   \label{fig:best_jerks}
@@ -222,31 +530,33 @@ Finally, Figure \ref{fig:pred_vs_ref} shows the predicted versus reference speed
   \centering
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/SAC_lr=0.0003_bs=256_el=50_entcoef=auto_timesteps=10000_acceleration_difference.png}
-    \caption*{(a) SAC: batch size = 256, learning rate = 0.0003, episode length = 50, entropy coefficient = auto}
+    \caption*{(a) SAC}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/PPO_lr=0.0003_bs=64_el=100_entcoef=0.005_timesteps=50000_acceleration_difference.png}
-    \caption*{(b) PPO: batch size = 64, learning rate = 0.0003, episode length = 100, entropy coefficient = 0.005}
+    \caption*{(b) PPO}
   \end{minipage}
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/TD3_lr=0.0001_bs=256_el=100_entcoef=None_timesteps=50000_acceleration_difference.png}
-    \caption*{(c) TD3: batch size = 256, learning rate = 0.0001, episode length = 100, entropy coefficient = N/A}
+    \caption*{(c) TD3}
   \end{minipage}
   \hfill
   \begin{minipage}[b]{0.49\textwidth}
     \includegraphics[width=\textwidth]{../best_test_images/DDPG_lr=0.0003_bs=128_el=100_entcoef=None_timesteps=50000_acceleration_difference.png}
-    \caption*{(d) DDPG: batch size = 128, learning rate = 0.0003, episode length = 100, entropy coefficient = N/A}
+    \caption*{(d) DDPG}
   \end{minipage}
   \caption{The acceleration difference between the ego vehicle and the lead vehicle with the best hyperparameter configuration. The desired range of $\pm 2$ m/s$^{2}$ is shaded in blue.}
   \label{fig:best_acceleration_difference}
 \end{figure}
 
-
+\newpage
 \section{Conclusion}
 
-This report compared four reinforcement learning algorithms: SAC, PPO, TD3, and DDPG. These algorithms were compared across multiple hyperparameter configurations in order to evaluate their performance in modeling an adaptive cruise control system.
-The metrics selected to analyze the different parameter confiugrations were MAE, RMSE and convergence rate. PPO and SAC consistently achieved lower error and smoother convergence, while TD3 and DDPG showed greater sensitivity to hyperparameters. On-policy methods, such as PPO and SAC, tolerated higher learning rates and smaller batch sizes, whereas off-policy methods, such as TD3 and DDPG, required more conservative parameters in order to achieve stable learning. Varying episode length revealed that PPO and SAC maintained stable performance across all episode lengths, unlike TD3 and DDPG, which exhibited greater variability. Finally, reward function exploration showed that smooth, convex rewards, such as absolute or squared, enhanced stability for stochastic methods, while the exponential reward function favored deterministic agents. The results of all of these configurations can be found in Table \ref{tab:allvalues}. Overall, PPO and SAC seemed to perform the best overall and in the most configurations.
+
+In this report we implemented an adaptive cruise control task using four reinforcement learning algorithms: SAC, PPO, TD3, and DDPG. The agents were evaluated using mean absolute error of the speed, as well as the average and variance of jerk. By varying learning rate, batch size, entropy coefficient, and episode length, we analyzed how each algorithm behaves under different training conditions.
+
+Through our analysis, SAC emerged as the best overall. It produced low MAE while keeping the following distance inside the desired 5 to 30 m range and maintaining moderate jerk. SAC was also robust to learning rate, batch size, and episode length. PPO could also learn a good ACC policy and provided the smoothest ride (lowest jerk and jerk variance), but only for moderate learning rates and small batch sizes. TD3 and DDPG occasionally achieved competitive MAE, but their performance was highly sensitive to hyperparameters, and they showed larger oscillations in following distance and acceleration. Additionally, they were prone to the following distance rapidly divering, leading to poor results.
 
 
 % \begin{table}[h!]
